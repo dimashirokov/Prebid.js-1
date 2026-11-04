@@ -1,12 +1,11 @@
-import {expect} from 'chai';
-import {spec} from 'modules/videoreachBidAdapter';
-import {newBidder} from 'src/adapters/bidderFactory';
+import { expect } from 'chai';
+import { spec } from 'modules/videoreachBidAdapter.js';
 
-const ENDPOINT_URL = '//a.videoreach.de/hb/';
+const ENDPOINT_URL = 'https://a.videoreach.com/hb/';
 
 describe('videoreachBidAdapter', function () {
   describe('isBidRequestValid', function () {
-    let bid = {
+    const bid = {
       'params': {
         'TagId': 'ABCDE'
       },
@@ -21,17 +20,17 @@ describe('videoreachBidAdapter', function () {
     });
 
     it('should return false when required params are not passed', function () {
-      let bid = Object.assign({}, bid);
-      delete bid.params;
-      bid.params = {
+      const invalidBid = Object.assign({}, bid);
+      delete invalidBid.params;
+      invalidBid.params = {
         'TagId': ''
       };
-      expect(spec.isBidRequestValid(bid)).to.equal(false);
+      expect(spec.isBidRequestValid(invalidBid)).to.equal(false);
     });
   });
 
   describe('buildRequests', function () {
-    let bidRequests = [
+    const bidRequests = [
       {
         'bidder': 'videoreach',
         'params': {
@@ -59,9 +58,9 @@ describe('videoreachBidAdapter', function () {
     });
 
     it('send bid request with GDPR to endpoint', function () {
-      let consentString = 'BOEFEAyOEFEAyAHABDENAI4AAAB9vABAASA';
+      const consentString = 'BOEFEAyOEFEAyAHABDENAI4AAAB9vABAASA';
 
-      let bidderRequest = {
+      const bidderRequest = {
         'gdprConsent': {
           'consentString': consentString,
           'gdprApplies': true
@@ -77,7 +76,7 @@ describe('videoreachBidAdapter', function () {
   });
 
   describe('interpretResponse', function () {
-    let serverResponse =
+    const serverResponse =
       {
         'body': {
           'responses': [{
@@ -86,18 +85,19 @@ describe('videoreachBidAdapter', function () {
             'cpm': 10.0,
             'width': '1',
             'height': '1',
-            'ad': '<script type="text/javascript" async="true" src="//a.videoreach.de/hb/js/?t=f86fb856-15d0-4591-84eb-0830b38e9cf2"></script>',
+            'ad': '<script type="text/javascript" async="true" src="https://a.videoreach.com/hb/js/?t=f86fb856-15d0-4591-84eb-0830b38e9cf2"></script>',
             'ttl': 360,
             'creativeId': '5cb5dc9375c0e',
             'netRevenue': true,
             'currency': 'EUR',
-            'sync': ['https:\/\/SYNC_URL']
+            'sync': ['https:\/\/SYNC_URL'],
+            'adomain': []
           }]
         }
       };
 
     it('should handle response', function() {
-      let expectedResponse = [
+      const expectedResponse = [
         {
           cpm: 10.0,
           width: '1',
@@ -107,22 +107,25 @@ describe('videoreachBidAdapter', function () {
           ttl: 360,
           ad: '<!-- AD -->',
           requestId: '242d506d4e4f15',
-          creativeId: '5cb5dc9375c0e'
+          creativeId: '5cb5dc9375c0e',
+          meta: {
+            advertiserDomains: []
+          }
         }
       ];
 
-      let result = spec.interpretResponse(serverResponse);
+      const result = spec.interpretResponse(serverResponse);
       expect(Object.keys(result[0])).to.deep.equal(Object.keys(expectedResponse[0]));
     });
 
     it('should handles empty response', function() {
-      let serverResponse = {
+      const serverResponse = {
         'body': {
           'responses': []
         }
       };
 
-      let result = spec.interpretResponse(serverResponse);
+      const result = spec.interpretResponse(serverResponse);
       expect(result.length).to.equal(0);
     });
 
@@ -135,7 +138,7 @@ describe('videoreachBidAdapter', function () {
           type: 'image',
           url: 'https://SYNC_URL'
         });
-      })
+      });
     });
   });
 });

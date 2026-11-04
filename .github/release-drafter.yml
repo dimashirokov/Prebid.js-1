@@ -1,0 +1,35 @@
+
+name-template: 'Prebid $RESOLVED_VERSION Release'
+tag-template: '$RESOLVED_VERSION'
+autolabeler:
+  - label: 'maintenance'
+    title:
+      - '/^(?!.*(bug|initial|release|fix)).*$/i'
+categories:
+  - title: '🏛 Core PRs'
+    labels:
+      - 'core'
+  - title: '🚀 New Features'
+    label: 'feature'
+  - title: '🐛 Bug Fixes'
+    labels:
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+  - title: '🛠 Maintenance'
+    labels: []
+change-template: '- $TITLE (#$NUMBER)'
+version-resolver:
+  major:
+    labels:
+      - 'major'
+  minor:
+    labels:
+      - 'minor'
+  patch:
+    labels:
+      - 'patch'
+  default: minor
+template: |
+  ## In This Release
+  $CHANGES

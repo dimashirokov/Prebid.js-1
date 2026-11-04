@@ -1,11 +1,12 @@
-import {expect} from 'chai';
-import {spec} from 'modules/adheseBidAdapter';
+import { expect } from 'chai';
+import { spec } from 'modules/adheseBidAdapter.js';
+import { config } from 'src/config.js';
 
 const BID_ID = 456;
 const TTL = 360;
 const NET_REVENUE = true;
 
-let minimalBid = function() {
+const minimalBid = function () {
   return {
     'bidId': BID_ID,
     'bidder': 'adhese',
@@ -14,11 +15,11 @@ let minimalBid = function() {
       location: '_main_page_',
       format: 'leaderboard'
     }
-  }
+  };
 };
 
-let bidWithParams = function(data) {
-  let bid = minimalBid();
+const bidWithParams = function (data) {
+  const bid = minimalBid();
   bid.params.data = data;
   return bid;
 };
@@ -52,7 +53,7 @@ describe('AdheseAdapter', function () {
     });
 
     it('should return false when required params are not passed', function () {
-      let bid = Object.assign({}, minimalBid());
+      const bid = Object.assign({}, minimalBid());
       delete bid.params;
       bid.params = {};
       expect(spec.isBidRequestValid(bid)).to.equal(false);
@@ -60,66 +61,141 @@ describe('AdheseAdapter', function () {
   });
 
   describe('buildRequests', function () {
-    let bidderRequest = {
+    const bidderRequest = {
       gdprConsent: {
         gdprApplies: true,
         consentString: 'CONSENT_STRING'
       },
       refererInfo: {
-        referer: 'http://prebid.org/dev-docs/subjects?_d=1'
+        page: 'http://prebid.org/dev-docs/subjects?_d=1'
       }
     };
 
-    it('should include all extra bid params', function () {
-      let req = spec.buildRequests([ bidWithParams({ 'ag': '25' }) ], bidderRequest);
+    it('should include requested slots', function () {
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
 
-      expect(req.url).to.contain('/sl_main_page_-leaderboard/ag25');
+      expect(JSON.parse(req.data).slots[0].slotname).to.equal('_main_page_-leaderboard');
     });
 
-    it('should include duplicate bid params once', function () {
-      let req = spec.buildRequests([ bidWithParams({ 'ag': '25' }), bidWithParams({ 'ag': '25', 'ci': 'gent' }) ], bidderRequest);
+    it('should include all extra bid params', function () {
+      const req = spec.buildRequests([bidWithParams({ 'ag': '25' })], bidderRequest);
 
-      expect(req.url).to.contain('/sl_main_page_-leaderboard/ag25/cigent');
+      expect(JSON.parse(req.data).slots[0].parameters).to.deep.include({ 'ag': ['25'] });
+    });
+
+    it('should assign bid params per slot', function () {
+      const req = spec.buildRequests([bidWithParams({ 'ag': '25' }), bidWithParams({ 'ag': '25', 'ci': 'gent' })], bidderRequest);
+
+      expect(JSON.parse(req.data).slots[0].parameters).to.deep.include({ 'ag': ['25'] }).and.not.to.deep.include({ 'ci': ['gent'] });
+      expect(JSON.parse(req.data).slots[1].parameters).to.deep.include({ 'ag': ['25'] }).and.to.deep.include({ 'ci': ['gent'] });
     });
 
     it('should split multiple target values', function () {
-      let req = spec.buildRequests([ bidWithParams({ 'ci': 'london' }), bidWithParams({ 'ci': 'gent' }) ], bidderRequest);
+      const req = spec.buildRequests([bidWithParams({ 'ci': 'london' }), bidWithParams({ 'ci': 'gent' })], bidderRequest);
 
-      expect(req.url).to.contain('/sl_main_page_-leaderboard/cilondon;gent');
+      expect(JSON.parse(req.data).slots[0].parameters).to.deep.include({ 'ci': ['london'] });
+      expect(JSON.parse(req.data).slots[1].parameters).to.deep.include({ 'ci': ['gent'] });
+    });
+
+    it('should filter out empty params', function () {
+      const req = spec.buildRequests([bidWithParams({ 'aa': [], 'bb': null, 'cc': '', 'dd': ['', ''], 'ee': [0, 1, null], 'ff': 0, 'gg': ['x', 'y', ''] })], bidderRequest);
+
+      const params = JSON.parse(req.data).slots[0].parameters;
+      expect(params).to.not.have.any.keys('aa', 'bb', 'cc', 'dd');
+      expect(params).to.deep.include({ 'ee': [0, 1], 'ff': [0], 'gg': ['x', 'y'] });
     });
 
     it('should include gdpr consent param', function () {
-      let req = spec.buildRequests([ minimalBid() ], bidderRequest);
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
 
-      expect(req.url).to.contain('/xtCONSENT_STRING');
+      expect(JSON.parse(req.data).parameters).to.deep.include({ 'xt': ['CONSENT_STRING'] });
     });
 
     it('should include referer param in base64url format', function () {
-      let req = spec.buildRequests([ minimalBid() ], bidderRequest);
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
 
-      expect(req.url).to.contain('/xfaHR0cDovL3ByZWJpZC5vcmcvZGV2LWRvY3Mvc3ViamVjdHM_X2Q9MQ');
+      expect(JSON.parse(req.data).parameters).to.deep.include({ 'xf': ['aHR0cDovL3ByZWJpZC5vcmcvZGV2LWRvY3Mvc3ViamVjdHM_X2Q9MQ'] });
+    });
+
+    it('should include eids', function () {
+      const bid = minimalBid();
+      bid.userIdAsEids = [{ source: 'id5-sync.com', uids: [{ id: 'ID5@59sigaS-...' }] }];
+
+      const req = spec.buildRequests([bid], bidderRequest);
+
+      expect(JSON.parse(req.data).user.ext.eids).to.deep.equal(bid.userIdAsEids);
+    });
+
+    it('should not include eids field when userid module disabled', function () {
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
+
+      expect(JSON.parse(req.data)).to.not.have.key('eids');
+    });
+
+    it('should request vast content as url by default', function () {
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
+
+      expect(JSON.parse(req.data).vastContentAsUrl).to.equal(true);
+    });
+
+    it('should request vast content as markup when configured', function () {
+      sinon.stub(config, 'getConfig').withArgs('adhese').returns({ vastContentAsUrl: false });
+
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
+
+      expect(JSON.parse(req.data).vastContentAsUrl).to.equal(false);
+      config.getConfig.restore();
     });
 
     it('should include bids', function () {
-      let bid = minimalBid();
-      let req = spec.buildRequests([ bid ], bidderRequest);
+      const bid = minimalBid();
+      const req = spec.buildRequests([bid], bidderRequest);
 
-      expect(req.bids).to.deep.equal([ bid ]);
+      expect(req.bids).to.deep.equal([bid]);
+    });
+
+    it('should make a POST request', function () {
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
+
+      expect(req.method).to.equal('POST');
+    });
+
+    it('should request the json endpoint', function () {
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
+
+      expect(req.url).to.equal('https://demo.ads.adhese.eu/json');
+    });
+
+    it('should include params specified in the config', function () {
+      sinon.stub(config, 'getConfig').withArgs('adhese').returns({ globalTargets: { 'tl': ['all'] } });
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
+
+      expect(JSON.parse(req.data).parameters).to.deep.include({ 'tl': ['all'] });
+      config.getConfig.restore();
+    });
+
+    it('should give priority to bid params over config params', function () {
+      sinon.stub(config, 'getConfig').withArgs('adhese').returns({ globalTargets: { 'xt': ['CONFIG_CONSENT_STRING'] } });
+      const req = spec.buildRequests([minimalBid()], bidderRequest);
+
+      expect(JSON.parse(req.data).parameters).to.deep.include({ 'xt': ['CONSENT_STRING'] });
+      config.getConfig.restore();
     });
   });
 
   describe('interpretResponse', () => {
-    let bidRequest = {
-      bids: [ minimalBid() ]
+    const bidRequest = {
+      bids: [minimalBid()]
     };
 
     it('should get correct ssp banner response', () => {
-      let sspBannerResponse = {
+      const sspBannerResponse = {
         body: [
           {
             origin: 'APPNEXUS',
             originInstance: '',
             ext: 'js',
+            slotID: '10',
             slotName: '_main_page_-leaderboard',
             adType: 'leaderboard',
             originData: {
@@ -134,16 +210,19 @@ describe('AdheseAdapter', function () {
             width: '728',
             height: '90',
             body: '<div style="background-color:red; height:250px; width:300px"></div>',
-            tracker: 'https://hosts-demo.adhese.com/rtb_gateway/handlers/client/track/?id=a2f39296-6dd0-4b3c-be85-7baa22e7ff4a',
-            impressionCounter: 'https://hosts-demo.adhese.com/rtb_gateway/handlers/client/track/?id=a2f39296-6dd0-4b3c-be85-7baa22e7ff4a',
-            extension: {'prebid': {'cpm': {'amount': '1.000000', 'currency': 'USD'}}}
+            tracker: 'https://demo.hosts.adhese.eu/rtb_gateway/handlers/client/track/?id=a2f39296-6dd0-4b3c-be85-7baa22e7ff4a',
+            impressionCounter: 'https://demo.hosts.adhese.eu/rtb_gateway/handlers/client/track/?id=a2f39296-6dd0-4b3c-be85-7baa22e7ff4a',
+            extension: { 'prebid': { 'cpm': { 'amount': '1.000000', 'currency': 'USD' } }, mediaType: 'banner' },
+            adomain: [
+              'www.example.com'
+            ]
           }
         ]
       };
 
-      let expectedResponse = [{
+      const expectedResponse = [{
         requestId: BID_ID,
-        ad: '<div style="background-color:red; height:250px; width:300px"></div><img src=\'https://hosts-demo.adhese.com/rtb_gateway/handlers/client/track/?id=a2f39296-6dd0-4b3c-be85-7baa22e7ff4a\' style=\'height:1px; width:1px; margin: -1px -1px; display:none;\'/>',
+        ad: '<div style="background-color:red; height:250px; width:300px"></div><img src=\'https://demo.hosts.adhese.eu/rtb_gateway/handlers/client/track/?id=a2f39296-6dd0-4b3c-be85-7baa22e7ff4a\' style=\'height:1px; width:1px; margin: -1px -1px; display:none;\'/>',
         cpm: 1,
         currency: 'USD',
         creativeId: '60613369',
@@ -153,12 +232,32 @@ describe('AdheseAdapter', function () {
         mediaType: 'banner',
         netRevenue: NET_REVENUE,
         ttl: TTL,
+        adhese: {
+          origin: 'APPNEXUS',
+          originInstance: '',
+          originData: {
+            adType: 'leaderboard',
+            seatbid: [
+              {
+                bid: [{ crid: '60613369', dealid: null }],
+                seat: '958'
+              }
+            ],
+            slotId: '10',
+            slotName: '_main_page_-leaderboard'
+          }
+        },
+        meta: {
+          advertiserDomains: [
+            'www.example.com'
+          ]
+        },
       }];
       expect(spec.interpretResponse(sspBannerResponse, bidRequest)).to.deep.equal(expectedResponse);
     });
 
     it('should get correct ssp video response', () => {
-      let sspVideoResponse = {
+      const sspVideoResponse = {
         body: [
           {
             origin: 'RUBICON',
@@ -168,12 +267,12 @@ describe('AdheseAdapter', function () {
             width: '640',
             height: '350',
             body: '<?xml version="1.0" encoding="UTF-8"?><VAST xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.0" xsi:noNamespaceSchemaLocation="vast.xsd"></VAST>',
-            extension: {'prebid': {'cpm': {'amount': '2.1', 'currency': 'USD'}}}
+            extension: { 'prebid': { 'cpm': { 'amount': '2.1', 'currency': 'USD' } }, mediaType: 'video' }
           }
         ]
       };
 
-      let expectedResponse = [{
+      const expectedResponse = [{
         requestId: BID_ID,
         vastXml: '<?xml version="1.0" encoding="UTF-8"?><VAST xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.0" xsi:noNamespaceSchemaLocation="vast.xsd"></VAST>',
         cpm: 2.1,
@@ -185,8 +284,56 @@ describe('AdheseAdapter', function () {
         mediaType: 'video',
         netRevenue: NET_REVENUE,
         ttl: TTL,
+        adhese: {
+          origin: 'RUBICON',
+          originInstance: '',
+          originData: {}
+        },
+        meta: {
+          advertiserDomains: []
+        },
       }];
       expect(spec.interpretResponse(sspVideoResponse, bidRequest)).to.deep.equal(expectedResponse);
+    });
+
+    it('should get correct ssp cache video response', () => {
+      const sspCachedVideoResponse = {
+        body: [
+          {
+            origin: 'RUBICON',
+            ext: 'js',
+            slotName: '_main_page_-leaderboard',
+            adType: 'leaderboard',
+            width: '640',
+            height: '350',
+            cachedBodyUrl: 'https://demo.ads.adhese.eu/content/38983ccc-4083-4c24-932c-96f798d969b3',
+            extension: { 'prebid': { 'cpm': { 'amount': '2.1', 'currency': 'USD' } }, mediaType: 'video' }
+          }
+        ]
+      };
+
+      const expectedResponse = [{
+        requestId: BID_ID,
+        vastUrl: 'https://demo.ads.adhese.eu/content/38983ccc-4083-4c24-932c-96f798d969b3',
+        cpm: 2.1,
+        currency: 'USD',
+        creativeId: 'RUBICON',
+        dealId: '',
+        width: 640,
+        height: 350,
+        mediaType: 'video',
+        netRevenue: NET_REVENUE,
+        ttl: TTL,
+        adhese: {
+          origin: 'RUBICON',
+          originInstance: '',
+          originData: {}
+        },
+        meta: {
+          advertiserDomains: []
+        },
+      }];
+      expect(spec.interpretResponse(sspCachedVideoResponse, bidRequest)).to.deep.equal(expectedResponse);
     });
 
     it('should get correct Adhese banner response', () => {
@@ -200,23 +347,23 @@ describe('AdheseAdapter', function () {
             adspaceId: '162363',
             body: '<script id="body" type="text/javascript"></script>',
             tag: '<script id="tag" type="text/javascript"></script>',
-            tracker: 'https://hosts-demo.adhese.com/track/tracker',
+            tracker: 'https://demo.hosts.adhese.eu/track/tracker',
             altText: '<ADHESE_ALT_TEXT>',
             height: '150',
             width: '840',
-            tagUrl: 'https://pool-demo.adhese.com/pool/lib/90511.js',
+            tagUrl: 'https://demo.pool.adhese.eu/pool/lib/90511.js',
             libId: '90511',
             id: '742898',
             advertiserId: '2081',
             ext: 'js',
-            url: 'https://hosts-demo.adhese.com/raylene/url',
-            clickTag: 'https://hosts-demo.adhese.com/raylene/clickTag',
-            poolPath: 'https://hosts-demo.adhese.com/pool/lib/',
+            url: 'https://demo.hosts.adhese.eu/raylene/url',
+            clickTag: 'https://demo.hosts.adhese.eu/raylene/clickTag',
+            poolPath: 'https://demo.hosts.adhese.eu/pool/lib/',
             orderName: 'Luminus boiler comodity-Pareto -201812',
             creativeName: 'nl_demo _network_ron_dlbd_840x150_fix_dir_asv_std_dis_brd_nrt_na_red',
             slotName: '_main_page_-leaderboard',
             slotID: '29306',
-            impressionCounter: 'https://hosts-demo.adhese.com/track/742898',
+            impressionCounter: 'https://demo.hosts.adhese.eu/track/742898',
             origin: 'JERLICIA',
             originData: {},
             auctionable: true,
@@ -226,15 +373,33 @@ describe('AdheseAdapter', function () {
                   amount: '5.96',
                   currency: 'USD'
                 }
-              }
+              },
+              mediaType: 'banner'
             }
           }
         ]
       };
 
-      let expectedResponse = [{
+      const expectedResponse = [{
         requestId: BID_ID,
-        ad: '<script id="body" type="text/javascript"></script><img src=\'https://hosts-demo.adhese.com/track/742898\' style=\'height:1px; width:1px; margin: -1px -1px; display:none;\'/>',
+        ad: '<script id="body" type="text/javascript"></script><img src=\'https://demo.hosts.adhese.eu/track/742898\' style=\'height:1px; width:1px; margin: -1px -1px; display:none;\'/>',
+        adhese: {
+          origin: '',
+          originInstance: '',
+          originData: {
+            adFormat: 'largeleaderboard',
+            adId: '742898',
+            adType: 'largeleaderboard',
+            adspaceId: '162363',
+            libId: '90511',
+            orderProperty: undefined,
+            priority: undefined,
+            viewableImpressionCounter: undefined,
+            slotId: '29306',
+            slotName: '_main_page_-leaderboard',
+            advertiserId: '2081'
+          }
+        },
         cpm: 5.96,
         currency: 'USD',
         creativeId: '742898',
@@ -244,6 +409,9 @@ describe('AdheseAdapter', function () {
         mediaType: 'banner',
         netRevenue: NET_REVENUE,
         ttl: TTL,
+        meta: {
+          advertiserDomains: []
+        },
       }];
       expect(spec.interpretResponse(adheseBannerResponse, bidRequest)).to.deep.equal(expectedResponse);
     });
@@ -268,17 +436,37 @@ describe('AdheseAdapter', function () {
             creativeName: 'PREROLL',
             slotName: '_main_page_-leaderboard',
             slotID: '41711',
-            impressionCounter: 'https://hosts-demo.adhese.com/track/742898',
+            impressionCounter: 'https://demo.hosts.adhese.eu/track/742898',
             origin: 'JERLICIA',
             originData: {},
-            auctionable: true
+            auctionable: true,
+            extension: {
+              mediaType: 'video'
+            }
           }
         ]
       };
 
-      let expectedResponse = [{
+      const expectedResponse = [{
         requestId: BID_ID,
         vastXml: '<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'no\'?><VAST version=\'2.0\' xmlns:xsi=\'http://www.w3.org/2001/XMLSchema-instance\' xsi:noNamespaceSchemaLocation=\'vast.xsd\'></VAST>',
+        adhese: {
+          origin: '',
+          originInstance: '',
+          originData: {
+            adFormat: '',
+            adId: '742470',
+            adType: 'preroll',
+            adspaceId: '164196',
+            libId: '89860',
+            orderProperty: undefined,
+            priority: undefined,
+            viewableImpressionCounter: undefined,
+            slotId: '41711',
+            slotName: '_main_page_-leaderboard',
+            advertiserId: '2263',
+          }
+        },
         cpm: 0,
         currency: 'USD',
         creativeId: '742470',
@@ -288,12 +476,82 @@ describe('AdheseAdapter', function () {
         mediaType: 'video',
         netRevenue: NET_REVENUE,
         ttl: TTL,
+        meta: {
+          advertiserDomains: []
+        },
+      }];
+      expect(spec.interpretResponse(adheseVideoResponse, bidRequest)).to.deep.equal(expectedResponse);
+    });
+
+    it('should get correct Adhese cached video response', () => {
+      const adheseVideoResponse = {
+        body: [
+          {
+            adType: 'preroll',
+            adFormat: '',
+            orderId: '22248',
+            adspaceId: '164196',
+            body: '<ADHESE_BODY>',
+            height: '360',
+            width: '640',
+            extension: {
+              mediaType: 'video'
+            },
+            cachedBodyUrl: 'https://demo.ads.adhese.eu/content/38983ccc-4083-4c24-932c-96f798d969b3',
+            libId: '89860',
+            id: '742470',
+            advertiserId: '2263',
+            ext: 'advar',
+            orderName: 'Smartphoto EOY-20181112',
+            creativeName: 'PREROLL',
+            slotName: '_main_page_-leaderboard',
+            slotID: '41711',
+            impressionCounter: 'https://demo.hosts.adhese.eu/track/742898',
+            origin: 'JERLICIA',
+            originData: {},
+            auctionable: true
+          }
+        ]
+      };
+
+      const expectedResponse = [{
+        requestId: BID_ID,
+        vastUrl: 'https://demo.ads.adhese.eu/content/38983ccc-4083-4c24-932c-96f798d969b3',
+        adhese: {
+          origin: '',
+          originInstance: '',
+          originData: {
+            adFormat: '',
+            adId: '742470',
+            adType: 'preroll',
+            adspaceId: '164196',
+            libId: '89860',
+            orderProperty: undefined,
+            priority: undefined,
+            viewableImpressionCounter: undefined,
+            slotId: '41711',
+            slotName: '_main_page_-leaderboard',
+            advertiserId: '2263',
+          }
+        },
+        cpm: 0,
+        currency: 'USD',
+        creativeId: '742470',
+        dealId: '22248',
+        width: 640,
+        height: 360,
+        mediaType: 'video',
+        netRevenue: NET_REVENUE,
+        ttl: TTL,
+        meta: {
+          advertiserDomains: []
+        },
       }];
       expect(spec.interpretResponse(adheseVideoResponse, bidRequest)).to.deep.equal(expectedResponse);
     });
 
     it('should return no bids for empty adserver response', () => {
-      let adserverResponse = { body: [] };
+      const adserverResponse = { body: [] };
       expect(spec.interpretResponse(adserverResponse, bidRequest)).to.be.empty;
     });
   });

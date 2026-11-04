@@ -1,8 +1,9 @@
-import {ajax} from '../src/ajax';
-import adapter from '../src/AnalyticsAdapter';
-import CONSTANTS from '../src/constants.json';
-import adapterManager from '../src/adapterManager';
-import {logError, logInfo, deepClone} from '../src/utils';
+import { ajax } from '../src/ajax.js';
+import adapter from '../libraries/analyticsAdapter/AnalyticsAdapter.js';
+import { EVENTS } from '../src/constants.js';
+import adapterManager from '../src/adapterManager.js';
+import { getGlobal } from '../src/prebidGlobal.js';
+import { logError, logInfo, deepClone } from '../src/utils.js';
 
 const analyticsType = 'endpoint';
 
@@ -11,12 +12,10 @@ export const ANALYTICS_VERSION = '1.0.0';
 const DEFAULT_SERVER = 'https://prebid-analytics.c.appier.net/v1';
 
 const {
-  EVENTS: {
-    AUCTION_END,
-    BID_WON,
-    BID_TIMEOUT
-  }
-} = CONSTANTS;
+  AUCTION_END,
+  BID_WON,
+  BID_TIMEOUT
+} = EVENTS;
 
 export const BIDDER_STATUS = {
   BID: 'bid',
@@ -36,7 +35,7 @@ export const getCpmInUsd = function (bid) {
 const analyticsOptions = {};
 
 export const parseBidderCode = function (bid) {
-  let bidderCode = bid.bidderCode || bid.bidder;
+  const bidderCode = bid.bidderCode || bid.bidder;
   return bidderCode.toLowerCase();
 };
 
@@ -44,7 +43,7 @@ export const parseAdUnitCode = function (bidResponse) {
   return bidResponse.adUnitCode.toLowerCase();
 };
 
-export const appierAnalyticsAdapter = Object.assign(adapter({DEFAULT_SERVER, analyticsType}), {
+export const appierAnalyticsAdapter = Object.assign(adapter({ DEFAULT_SERVER, analyticsType }), {
 
   cachedAuctions: {},
 
@@ -136,7 +135,7 @@ export const appierAnalyticsAdapter = Object.assign(adapter({DEFAULT_SERVER, ana
     message.adUnits[adUnitCode][bidder] = bidResponse;
   },
   createBidMessage(auctionEndArgs, winningBids, timeoutBids) {
-    const {auctionId, timestamp, timeout, auctionEnd, adUnitCodes, bidsReceived, noBids} = auctionEndArgs;
+    const { auctionId, timestamp, timeout, auctionEnd, adUnitCodes, bidsReceived, noBids } = auctionEndArgs;
     const message = this.createCommonMessage(auctionId);
 
     message.auctionElapsed = (auctionEnd - timestamp);
@@ -177,7 +176,7 @@ export const appierAnalyticsAdapter = Object.assign(adapter({DEFAULT_SERVER, ana
       const adUnitCode = parseAdUnitCode(bid);
       const bidder = parseBidderCode(bid);
       message.adUnits[adUnitCode] = message.adUnits[adUnitCode] || {};
-      message.adUnits[adUnitCode][bidder] = {ad: bid.ad};
+      message.adUnits[adUnitCode][bidder] = { ad: bid.ad };
     });
     return message;
   },
@@ -189,7 +188,7 @@ export const appierAnalyticsAdapter = Object.assign(adapter({DEFAULT_SERVER, ana
   },
   handleAuctionEnd(auctionEndArgs) {
     const cachedAuction = this.getCachedAuction(auctionEndArgs.auctionId);
-    const highestCpmBids = pbjs.getHighestCpmBids();
+    const highestCpmBids = getGlobal().getHighestCpmBids();
     this.sendEventMessage('bid',
       this.createBidMessage(auctionEndArgs, highestCpmBids, cachedAuction.timeoutBids)
     );
@@ -208,7 +207,7 @@ export const appierAnalyticsAdapter = Object.assign(adapter({DEFAULT_SERVER, ana
   handleBidWon(bidWonArgs) {
     this.sendEventMessage('imp', this.createImpressionMessage(bidWonArgs));
   },
-  track({eventType, args}) {
+  track({ eventType, args }) {
     if (analyticsOptions.sampled) {
       switch (eventType) {
         case BID_WON:

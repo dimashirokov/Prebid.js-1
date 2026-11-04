@@ -3,7 +3,7 @@
 ```
 Module Name: Cpmstar Bidder Adapter
 Module Type: Bidder Adapter
-Maintainer: josh@cpmstar.com
+Maintainer: prebid@cpmstar.com
 ```
 
 # Description

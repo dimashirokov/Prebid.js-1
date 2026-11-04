@@ -1,7 +1,7 @@
-import {registerBidder} from '../src/adapters/bidderFactory';
-const utils = require('../src/utils');
+import { getBidIdParameter, getValue } from '../src/utils.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
 const BIDDER_CODE = 'videoreach';
-const ENDPOINT_URL = '//a.videoreach.de/hb/';
+const ENDPOINT_URL = 'https://a.videoreach.com/hb/';
 
 export const spec = {
   code: BIDDER_CODE,
@@ -12,18 +12,24 @@ export const spec = {
   },
 
   buildRequests: function(validBidRequests, bidderRequest) {
-    var data = {
-      referrer: utils.getTopWindowUrl(),
+    const data = {
       data: validBidRequests.map(function(bid) {
         return {
-          TagId: utils.getValue(bid.params, 'TagId'),
-          bidId: utils.getBidIdParameter('bidId', bid),
-          bidderRequestId: utils.getBidIdParameter('bidderRequestId', bid),
-          auctionId: utils.getBidIdParameter('auctionId', bid),
-          transactionId: utils.getBidIdParameter('transactionId', bid)
-        }
+          TagId: getValue(bid.params, 'TagId'),
+          adUnitCode: getBidIdParameter('adUnitCode', bid),
+          bidId: getBidIdParameter('bidId', bid),
+          bidderRequestId: getBidIdParameter('bidderRequestId', bid),
+          // TODO: fix auctionId leak: https://github.com/prebid/Prebid.js/issues/9781
+          auctionId: getBidIdParameter('auctionId', bid),
+          transactionId: bid.ortb2Imp?.ext?.tid,
+        };
       })
     };
+
+    if (bidderRequest && bidderRequest.refererInfo) {
+      // TODO: is 'page' the right value here?
+      data.referrer = bidderRequest.refererInfo.page;
+    }
 
     if (bidderRequest && bidderRequest.gdprConsent) {
       data.gdpr = {
@@ -54,7 +60,10 @@ export const spec = {
           ttl: bid.ttl,
           ad: bid.ad,
           requestId: bid.bidId,
-          creativeId: bid.creativeId
+          creativeId: bid.creativeId,
+          meta: {
+            advertiserDomains: bid && bid.adomain ? bid.adomain : []
+          }
         };
         bidResponses.push(bidResponse);
       });
@@ -65,10 +74,10 @@ export const spec = {
   getUserSyncs: function(syncOptions, responses, gdprConsent) {
     const syncs = [];
 
-    if (syncOptions.pixelEnabled && responses.length) {
-      const SyncPixels = responses[0].body.responses[0].sync;
-
+    if (responses.length && responses[0].body.responses.length) {
       let params = '';
+      var gdpr;
+
       if (gdprConsent && typeof gdprConsent.consentString === 'string') {
         if (typeof gdprConsent.gdprApplies === 'boolean') {
           params += 'gdpr=' + gdprConsent.gdprApplies + '&gdpr_consent=' + gdprConsent.consentString;
@@ -77,16 +86,34 @@ export const spec = {
         }
       }
 
-      var gdpr;
-      if (SyncPixels) {
-        SyncPixels.forEach(sync => {
-          gdpr = (params) ? ((sync.split('?')[1] ? '&' : '?') + params) : '';
+      if (syncOptions.pixelEnabled) {
+        const SyncPixels = responses[0].body.responses[0].sync;
 
-          syncs.push({
-            type: 'image',
-            url: sync + gdpr
+        if (SyncPixels) {
+          SyncPixels.forEach(sync => {
+            gdpr = (params) ? ((sync.split('?')[1] ? '&' : '?') + params) : '';
+
+            syncs.push({
+              type: 'image',
+              url: sync + gdpr
+            });
           });
-        });
+        }
+      }
+
+      if (syncOptions.iframeEnabled) {
+        const SyncFrame = responses[0].body.responses[0].syncframe;
+
+        if (SyncFrame) {
+          SyncFrame.forEach(sync => {
+            gdpr = (params) ? ((sync.split('?')[1] ? '&' : '?') + params) : '';
+
+            syncs.push({
+              type: 'iframe',
+              url: sync + gdpr
+            });
+          });
+        }
       }
     }
 

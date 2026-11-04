@@ -17,7 +17,11 @@ Please reach out to pmp@rtbhouse.com to receive your own
            // banner
            {
                code: 'test-div',
-               sizes: [[300, 250]],
+               mediaTypes: {
+	           banner: {
+                       sizes: [[300, 250]],
+                   }
+               },
                bids: [
                    {
                        bidder: "rtbhouse",
@@ -53,7 +57,7 @@ Please reach out to pmp@rtbhouse.com to receive your own
                         bidder: "rtbhouse",
                         params: {
                             region: 'prebid-eu',
-                            publisherId: 'PREBID_TEST_ID'
+                            publisherId: 'PREBID_TEST_ID',
                             bidfloor: 0.01  // optional
                         }
                     }

@@ -1,135 +1,68 @@
-import * as utils from '../src/utils';
-import {registerBidder} from '../src/adapters/bidderFactory';
-import {BANNER} from '../src/mediaTypes';
-export const URL = '//prebid.cootlogix.com';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER, NATIVE, VIDEO } from '../src/mediaTypes.js';
+import { getStorageManager } from '../src/storageManager.js';
+import {
+  createSessionId,
+  isBidRequestValid,
+  getCacheOpt,
+  getNextDealId,
+  onBidWon,
+  createUserSyncGetter,
+  getVidazooSessionId,
+  createBuildRequestsFn,
+  createInterpretResponseFn,
+  onBidBillable,
+  onAdRenderSucceeded,
+  onBidViewable,
+} from '../libraries/vidazooUtils/bidderUtils.js';
+import { OPT_CACHE_KEY, OPT_TIME_KEY, ALIASES } from '../libraries/vidazooUtils/constants.js';
+
+/**
+ * @typedef {import('./vidazooBidAdapter.d.ts').VidazooBidRequestParams} VidazooBidRequestParams
+ */
+
+const GVLID = 744;
+const DEFAULT_SUB_DOMAIN = 'prebid';
+const DEFAULT_BASE_ULR = 'cootlogix.com';
 const BIDDER_CODE = 'vidazoo';
-const CURRENCY = 'USD';
-const TTL_SECONDS = 60 * 5;
-const INTERNAL_SYNC_TYPE = {
-  IFRAME: 'iframe',
-  IMAGE: 'img'
-};
-const EXTERNAL_SYNC_TYPE = {
-  IFRAME: 'iframe',
-  IMAGE: 'image'
-};
+const BIDDER_VERSION = '1.0.0';
+export const storage = getStorageManager({ bidderCode: BIDDER_CODE });
+export const webSessionId = createSessionId();
 
-function isBidRequestValid(bid) {
-  const params = bid.params || {};
-  return !!(params.cId && params.pId);
+export function createDomain(subDomain = DEFAULT_SUB_DOMAIN, baseURL = DEFAULT_BASE_ULR) {
+  return `https://${subDomain}.${baseURL}`;
 }
 
-function buildRequest(bid, topWindowUrl, size, bidderRequest) {
-  const {params, bidId} = bid;
-  const {bidFloor, cId, pId, ext} = params;
-  // Prebid's util function returns AppNexus style sizes (i.e. 300x250)
-  const [width, height] = size.split('x');
+function createUniqueRequestData(hashUrl) {
+  const dealId = getNextDealId(storage, hashUrl);
+  const sessionId = getVidazooSessionId(storage);
+  const ptrace = getCacheOpt(storage, OPT_CACHE_KEY);
+  const vdzhum = getCacheOpt(storage, OPT_TIME_KEY);
 
-  const dto = {
-    method: 'GET',
-    url: `${URL}/prebid/${cId}`,
-    data: {
-      url: topWindowUrl,
-      cb: Date.now(),
-      bidFloor: bidFloor,
-      bidId: bidId,
-      publisherId: pId,
-      consent: bidderRequest.gdprConsent && bidderRequest.gdprConsent.consentString,
-      width,
-      height
-    }
-  }
-
-  utils._each(ext, (value, key) => {
-    dto.data['ext.' + key] = value;
-  });
-
-  return dto;
+  return {
+    dealId: dealId, sessionId: sessionId, ptrace: ptrace, vdzhum: vdzhum, webSessionId: webSessionId
+  };
 }
 
-function buildRequests(validBidRequests, bidderRequest) {
-  const topWindowUrl = utils.getTopWindowUrl();
-  const requests = [];
-  validBidRequests.forEach(validBidRequest => {
-    const sizes = utils.parseSizesInput(validBidRequest.sizes);
-    sizes.forEach(size => {
-      const request = buildRequest(validBidRequest, topWindowUrl, size, bidderRequest);
-      requests.push(request);
-    });
-  });
-  return requests;
-}
-
-function interpretResponse(serverResponse, request) {
-  if (!serverResponse || !serverResponse.body) {
-    return [];
-  }
-  const {creativeId, ad, price, exp} = serverResponse.body;
-  if (!ad || !price) {
-    return [];
-  }
-  const {bidId, width, height} = request.data;
-  try {
-    return [{
-      requestId: bidId,
-      cpm: price,
-      width: width,
-      height: height,
-      creativeId: creativeId,
-      currency: CURRENCY,
-      netRevenue: true,
-      ttl: exp || TTL_SECONDS,
-      ad: ad
-    }];
-  } catch (e) {
-    return [];
-  }
-}
-
-function getUserSyncs(syncOptions, responses) {
-  const {iframeEnabled, pixelEnabled} = syncOptions;
-
-  if (iframeEnabled) {
-    return [{
-      type: 'iframe',
-      url: '//static.cootlogix.com/basev/sync/user_sync.html'
-    }];
-  }
-
-  if (pixelEnabled) {
-    const lookup = {};
-    const syncs = [];
-    responses.forEach(response => {
-      const {body} = response;
-      const cookies = body ? body.cookies || [] : [];
-      cookies.forEach(cookie => {
-        switch (cookie.type) {
-          case INTERNAL_SYNC_TYPE.IFRAME:
-            break;
-          case INTERNAL_SYNC_TYPE.IMAGE:
-            if (pixelEnabled && !lookup[cookie.src]) {
-              syncs.push({
-                type: EXTERNAL_SYNC_TYPE.IMAGE,
-                url: cookie.src
-              });
-            }
-            break;
-        }
-      });
-    });
-    return syncs;
-  }
-
-  return [];
-}
+const NATIVE_OPTIONS = { supportNative: true };
+const buildRequests = createBuildRequestsFn(createDomain, createUniqueRequestData, storage, BIDDER_CODE, BIDDER_VERSION, true, NATIVE_OPTIONS);
+const interpretResponse = createInterpretResponseFn(BIDDER_CODE, true, NATIVE_OPTIONS);
+const getUserSyncs = createUserSyncGetter();
 
 export const spec = {
   code: BIDDER_CODE,
-  supportedMediaTypes: [BANNER],
+  version: BIDDER_VERSION,
+  gvlid: GVLID,
+  supportedMediaTypes: [BANNER, VIDEO, NATIVE],
+  aliases: ALIASES,
   isBidRequestValid,
   buildRequests,
   interpretResponse,
-  getUserSyncs
+  getUserSyncs,
+  onBidWon,
+  onBidBillable,
+  onAdRenderSucceeded,
+  onBidViewable
 };
 
 registerBidder(spec);

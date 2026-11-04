@@ -1,10 +1,13 @@
-import { ajax } from '../src/ajax';
-import adapter from '../src/AnalyticsAdapter';
-import adapterManager from '../src/adapterManager';
-import * as utils from '../src/utils';
-import { parse as parseURL } from '../src/url';
+import { parseUrl, logError } from '../src/utils.js';
+import { ajax } from '../src/ajax.js';
+import adapter from '../libraries/analyticsAdapter/AnalyticsAdapter.js';
+import adapterManager from '../src/adapterManager.js';
+import { getStorageManager } from '../src/storageManager.js';
+import { EVENTS } from '../src/constants.js';
+import { MODULE_TYPE_ANALYTICS } from '../src/activities/modules.js';
 
-const CONSTANTS = require('../src/constants.json');
+const MODULE_CODE = 'finteza';
+const storage = getStorageManager({ moduleType: MODULE_TYPE_ANALYTICS, moduleName: MODULE_CODE });
 
 const ANALYTICS_TYPE = 'endpoint';
 const FINTEZA_HOST = 'https://content.mql5.com/tr';
@@ -19,17 +22,46 @@ const SESSION_ID = '_fz_ssn';
 const SESSION_DURATION = 30 * 60 * 1000;
 const SESSION_RAND_PART = 9;
 const TRACK_TIME_KEY = '_fz_tr';
+const UNIQ_ID_KEY = '_fz_uniq';
 
 function getPageInfo() {
   const pageInfo = {
     domain: window.location.hostname,
-  }
+  };
 
   if (document.referrer) {
-    pageInfo.referrerDomain = parseURL(document.referrer).hostname;
+    pageInfo.referrerDomain = parseUrl(document.referrer).hostname;
   }
 
   return pageInfo;
+}
+
+function getUniqId() {
+  let isUniqFromLS;
+  let uniq = storage.getCookie(UNIQ_ID_KEY);
+  if (!uniq) {
+    try {
+      if (storage.hasLocalStorage()) {
+        uniq = storage.getDataFromLocalStorage(UNIQ_ID_KEY) || '';
+        isUniqFromLS = true;
+      }
+    } catch (b) {}
+  }
+
+  if (uniq && isNaN(uniq)) {
+    uniq = null;
+  }
+
+  if (uniq && isUniqFromLS) {
+    const expires = new Date();
+    expires.setFullYear(expires.getFullYear() + 10);
+
+    try {
+      storage.setCookie(UNIQ_ID_KEY, uniq, expires.toUTCString());
+    } catch (e) {}
+  }
+
+  return uniq;
 }
 
 function initFirstVisit() {
@@ -38,12 +70,13 @@ function initFirstVisit() {
   let cookies;
 
   try {
-    cookies = parseCookies(document.cookie);
+    // TODO: commented out because of rule violations
+    cookies = {}; // parseCookies(document.cookie);
   } catch (a) {
     cookies = {};
   }
 
-  visitDate = cookies[ FIRST_VISIT_DATE ];
+  visitDate = cookies[FIRST_VISIT_DATE];
 
   if (!visitDate) {
     now = new Date();
@@ -53,13 +86,14 @@ function initFirstVisit() {
     now.setFullYear(now.getFullYear() + 20);
 
     try {
-      document.cookie = FIRST_VISIT_DATE + '=' + visitDate + '; path=/; expires=' + now.toUTCString();
+      storage.setCookie(FIRST_VISIT_DATE, visitDate, now.toUTCString());
     } catch (e) {}
   }
 
   return visitDate;
 }
-
+// TODO: commented out because of rule violations
+/*
 function trim(string) {
   if (string.trim) {
     return string.trim();
@@ -73,7 +107,7 @@ function parseCookies(cookie) {
   let param, value;
   let i, j;
 
-  if (!cookie) {
+  if (!cookie || !storage.cookiesAreEnabled()) {
     return {};
   }
 
@@ -98,10 +132,11 @@ function parseCookies(cookie) {
 
   return values;
 }
+*/
 
 function getRandAsStr(digits) {
   let str = '';
-  let rand = 0;
+  let rand;
   let i;
 
   digits = digits || 4;
@@ -133,25 +168,26 @@ function initSession() {
   const now = new Date();
   const expires = new Date(now.getTime() + SESSION_DURATION);
   const timestamp = Math.floor(now.getTime() / 1000);
-  let begin = 0;
+  let begin;
   let cookies;
   let sessionId;
   let sessionDuration;
   let isNew = false;
 
   try {
-    cookies = parseCookies(document.cookie);
+    // TODO: commented out because of rule violations
+    cookies = {}; // parseCookies(document.cookie);
   } catch (a) {
     cookies = {};
   }
 
-  sessionId = cookies[ SESSION_ID ];
+  sessionId = cookies[SESSION_ID];
 
   if (!sessionId ||
       !checkSessionByExpires() ||
       !checkSessionByReferer() ||
       !checkSessionByDay()) {
-    sessionId = '' + timestamp + getRandAsStr(SESSION_RAND_PART);
+    sessionId = '' + timestamp + getRandAsStr(SESSION_RAND_PART); // lgtm [js/insecure-randomness]
     begin = timestamp;
 
     isNew = true;
@@ -166,7 +202,7 @@ function initSession() {
   }
 
   try {
-    document.cookie = SESSION_ID + '=' + sessionId + '; path=/; expires=' + expires.toUTCString();
+    storage.setCookie(SESSION_ID, sessionId, expires.toUTCString());
   } catch (e) {}
 
   return {
@@ -212,10 +248,10 @@ function saveTrackRequestTime() {
   const expires = new Date(now + SESSION_DURATION);
 
   try {
-    if (window.localStorage) {
-      window.localStorage.setItem(TRACK_TIME_KEY, now.toString());
+    if (storage.hasLocalStorage()) {
+      storage.setDataInLocalStorage(TRACK_TIME_KEY, now.toString());
     } else {
-      document.cookie = TRACK_TIME_KEY + '=' + now + '; path=/; expires=' + expires.toUTCString();
+      storage.setCookie(TRACK_TIME_KEY, now.toString(), expires.toUTCString());
     }
   } catch (a) {}
 }
@@ -224,15 +260,16 @@ function getTrackRequestLastTime() {
   let cookie;
 
   try {
-    if (window.localStorage) {
+    if (storage.hasLocalStorage()) {
       return parseInt(
-        window.localStorage.getItem(TRACK_TIME_KEY) || 0,
+        storage.getDataFromLocalStorage(TRACK_TIME_KEY) || 0,
         10,
       );
     }
 
-    cookie = parseCookies(document.cookie);
-    cookie = cookie[ TRACK_TIME_KEY ];
+    // TODO: commented out because of rule violations
+    cookie = {}; // parseCookies(document.cookie);
+    cookie = cookie[TRACK_TIME_KEY];
     if (cookie) {
       return parseInt(cookie, 10);
     }
@@ -245,14 +282,14 @@ function getAntiCacheParam() {
   const date = new Date();
   const rand = (Math.random() * 99999 + 1) >>> 0;
 
-  return ([ date.getTime(), rand ].join(''));
+  return ([date.getTime(), rand].join(''));
 }
 
 function replaceBidder(str, bidder) {
   let _str = str;
-  _str = _str.replace(/\%bidder\%/, bidder.toLowerCase());
-  _str = _str.replace(/\%BIDDER\%/, bidder.toUpperCase());
-  _str = _str.replace(/\%Bidder\%/, bidder.charAt(0).toUpperCase() + bidder.slice(1).toLowerCase());
+  _str = _str.replace(/%bidder%/, bidder.toLowerCase());
+  _str = _str.replace(/%BIDDER%/, bidder.toUpperCase());
+  _str = _str.replace(/%Bidder%/, bidder.charAt(0).toUpperCase() + bidder.slice(1).toLowerCase());
 
   return _str;
 }
@@ -291,23 +328,23 @@ function prepareBidTimeoutParams(args) {
       value: bid.timeout,
       unit: 'ms'
     };
-  })
+  });
 }
 
 function prepareTrackData(evtype, args) {
   let prepareParams = null;
 
   switch (evtype) {
-    case CONSTANTS.EVENTS.BID_REQUESTED:
+    case EVENTS.BID_REQUESTED:
       prepareParams = prepareBidRequestedParams;
       break;
-    case CONSTANTS.EVENTS.BID_RESPONSE:
+    case EVENTS.BID_RESPONSE:
       prepareParams = prepareBidResponseParams;
       break;
-    case CONSTANTS.EVENTS.BID_WON:
+    case EVENTS.BID_WON:
       prepareParams = prepareBidWonParams;
       break;
-    case CONSTANTS.EVENTS.BID_TIMEOUT:
+    case EVENTS.BID_TIMEOUT:
       prepareParams = prepareBidTimeoutParams;
       break;
   }
@@ -328,7 +365,11 @@ function prepareTrackData(evtype, args) {
       scr_res: fntzAnalyticsAdapter.context.screenResolution,
       fv_date: fntzAnalyticsAdapter.context.firstVisit,
       ac: getAntiCacheParam(),
-    })
+    });
+
+    if (fntzAnalyticsAdapter.context.uniqId) {
+      trackData.fz_uniq = fntzAnalyticsAdapter.context.uniqId;
+    }
 
     if (session.id) {
       trackData.ssn = session.id;
@@ -347,17 +388,17 @@ function sendTrackRequest(trackData) {
   try {
     ajax(
       fntzAnalyticsAdapter.context.host,
-      null, // Callback
+      null,
       trackData,
       {
         method: 'GET',
-        contentType: 'application/x-www-form-urlencoded',
-        // preflight: true,
+        withCredentials: true,
+        contentType: 'application/x-www-form-urlencoded'
       },
     );
     saveTrackRequestTime();
   } catch (err) {
-    utils.logError('Error on send data: ', err);
+    logError('Error on send data: ', err);
   }
 }
 
@@ -382,7 +423,7 @@ fntzAnalyticsAdapter.originEnableAnalytics = fntzAnalyticsAdapter.enableAnalytic
 
 fntzAnalyticsAdapter.enableAnalytics = function (config) {
   if (!config.options.id) {
-    utils.logError('Client ID (id) option is not defined. Analytics won\'t work');
+    logError('Client ID (id) option is not defined. Analytics won\'t work');
     return;
   }
 
@@ -396,6 +437,7 @@ fntzAnalyticsAdapter.enableAnalytics = function (config) {
     bidWonTrack: config.options.bidWonTrack || BID_WON_TRACK,
     firstVisit: initFirstVisit(),
     screenResolution: `${window.screen.width}x${window.screen.height}`,
+    uniqId: getUniqId(),
     pageInfo: getPageInfo(),
   };
 
@@ -404,7 +446,7 @@ fntzAnalyticsAdapter.enableAnalytics = function (config) {
 
 adapterManager.registerAnalyticsAdapter({
   adapter: fntzAnalyticsAdapter,
-  code: 'finteza'
+  code: MODULE_CODE,
 });
 
 export default fntzAnalyticsAdapter;

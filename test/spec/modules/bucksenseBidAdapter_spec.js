@@ -1,9 +1,9 @@
-import {expect} from 'chai';
-import {spec} from 'modules/bucksenseBidAdapter';
+import { expect } from 'chai';
+import { spec } from 'modules/bucksenseBidAdapter.js';
 
 describe('Bucksense Adapter', function() {
   const BIDDER_CODE = 'bucksense';
-  const BID_ID = '12345';
+
   const PLACE_ID = '1000';
 
   function getValidBidObject() {
@@ -12,7 +12,7 @@ describe('Bucksense Adapter', function() {
       params: {
         placementId: PLACE_ID,
       }
-    }
+    };
   };
 
   describe('isBidRequestValid', function() {
@@ -29,11 +29,6 @@ describe('Bucksense Adapter', function() {
     it('returns true when valid test bid request is sent', function() {
       bid.params['test'] = 1;
       expect(spec.isBidRequestValid(bid)).to.be.true;
-    });
-
-    it('returns false when bidder not set to "bucksense"', function() {
-      bid.bidder = 'dummy';
-      expect(spec.isBidRequestValid(bid)).to.be.false;
     });
 
     it('returns false when params not set', function() {
@@ -59,12 +54,12 @@ describe('Bucksense Adapter', function() {
             },
             'mediaTypes': {
               'banner': {
-                'sizes': [ [ 300, 250 ], [ 300, 600 ] ]
+                'sizes': [[300, 250], [300, 600]]
               }
             },
             'adUnitCode': 'test-div',
             'transactionId': '52b3ed07-2a09-4f58-a426-75acc7602c96',
-            'sizes': [ [ 300, 250 ], [ 300, 600 ] ],
+            'sizes': [[300, 250], [300, 600]],
             'bidId': '22aecdacdcd773',
             'bidderRequestId': '1feebcb5938c7e',
             'auctionId': '73540558-86cb-4eef-895f-bf99c5353bd7',
@@ -75,11 +70,11 @@ describe('Bucksense Adapter', function() {
         'auctionStart': 1557176022728,
         'timeout': 1000,
         'refererInfo': {
-          'referer': 'http://stefanod.hera.pe/prebid/?pbjs_debug=true',
+          'referer': 'https://stefanod.hera.pe/prebid/?pbjs_debug=true',
           'reachedTop': true,
           'numIframes': 0,
           'stack': [
-            'http://stefanod.hera.pe/prebid/?pbjs_debug=true'
+            'https://stefanod.hera.pe/prebid/?pbjs_debug=true'
           ]
         },
         'start': 1557176022731
@@ -104,17 +99,17 @@ describe('Bucksense Adapter', function() {
     beforeEach(function() {
       serverRequest = {
         'method': 'POST',
-        'url': 'https://prebid.bksn.se:445/prebidjs/',
+        'url': 'https://prebid.bksn.se/prebidjs/',
         'data': {
           'pub_id': 'prebid.org',
           'pl_id': '1000',
           'secure': 0,
-          'href': 'http://prebid.org/developers.html',
+          'href': 'https://prebid.org/developers.html',
           'bid_id': '27aaf8e96d9fd5',
           'params': {
             'placementId': '1000'
           },
-          'sizes': [ [ 300, 250 ], [ 300, 600 ] ]
+          'sizes': [[300, 250], [300, 600]]
         }
       };
 
@@ -128,7 +123,10 @@ describe('Bucksense Adapter', function() {
           'creativeId': 'creative002',
           'currency': 'USD',
           'netRevenue': false,
-          'ad': '<div id=\"bks-banner\"><a href=\"https://www.bucksense.com\" target=\"_blank\"><img src=\"https://i.bksn.se/s/1334/c5acdc75ba096bk.jpg\" width=\"300\" height=\"250\"/></a></div>'
+          'ad': '<div id=\"bks-banner\"><a href=\"https://www.bucksense.com\" target=\"_blank\"><img src=\"https://i.bksn.se/s/1334/c5acdc75ba096bk.jpg\" width=\"300\" height=\"250\"/></a></div>',
+          'meta': {
+            'advertiserDomains': ['http://www.bucksense.com/']
+          }
         }
       };
     });

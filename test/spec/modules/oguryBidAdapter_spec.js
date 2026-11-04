@@ -1,0 +1,1403 @@
+import { expect } from 'chai';
+import sinon from 'sinon';
+import { ortbConverterProps, spec } from 'modules/oguryBidAdapter';
+import * as utils from 'src/utils.js';
+import { getRefererInfo } from 'src/refererDetection.js';
+import { server } from '../../mocks/xhr.js';
+
+const BID_URL = 'https://mweb-hb.presage.io/api/header-bidding-request';
+const TIMEOUT_URL = 'https://ms-ads-monitoring-events.presage.io/bid_timeout';
+
+describe('OguryBidAdapter', () => {
+  let bidRequests, bidderRequestBase, ortb2;
+
+  const currentLocation = 'https://mwtt.ogury.tech/advanced';
+
+  bidRequests = [
+    {
+      adUnitCode: 'adUnitCode',
+      ortb2Imp: {
+        ext: {
+          gpid: 'gpid'
+        }
+      },
+      auctionId: 'auctionId',
+      bidId: 'bidId',
+      bidder: 'ogury',
+      params: {
+        assetKey: 'OGY-assetkey',
+        adUnitId: 'adunitId',
+        xMargin: 20,
+        yMarging: 20,
+        gravity: 'TOP_LEFT',
+      },
+      mediaTypes: {
+        banner: {
+          sizes: [[300, 250]]
+        }
+      },
+      getFloor: ({ size, currency, mediaType }) => {
+        const floorResult = {
+          currency: 'USD',
+          floor: 0
+        };
+
+        if (mediaType === 'video') {
+          floorResult.floor = 1000;
+        } else {
+          floorResult.floor = 4;
+        }
+
+        return floorResult;
+      },
+      transactionId: 'transactionId',
+      userId: { pubcid: 'f5debac9-9a8e-4c08-9820-51e96b69f858' }
+    },
+    {
+      adUnitCode: 'adUnitCode2',
+      auctionId: 'auctionId',
+      bidId: 'bidId2',
+      bidder: 'ogury',
+      params: {
+        assetKey: 'OGY-assetkey',
+        adUnitId: 'adunitId2'
+      },
+      mediaTypes: {
+        banner: {
+          sizes: [[600, 500]]
+        }
+      },
+      transactionId: 'transactionId2'
+    },
+  ];
+
+  ortb2 = {
+    regs: {
+      gpp_sid: [7],
+      gpp: 'DBABLA~BAAAAAAAAQA.QA',
+      ext: { gdpr: 1 }
+    },
+    site: {
+      domain: 'mwtt.ogury.tech',
+      publisher: { domain: 'ogury.tech', id: 'ca06d4199b92bf6808e5ce15b28c6d30' },
+      page: currentLocation,
+      ref: 'https://google.com'
+    },
+    user: {
+      ext: {
+        consent: 'CQJI3tqQJI3tqFzABBENBJFsAP_gAEPgAAqIg1NX_H__bW9r8Xr3aft0eY1P99j77sQxBhfJE-4FyLvW_JwXx2EwNA26tqIKmRIEu3ZBIQFlHJHURVigaogVryHsYkGcgTNKJ6BkgFMRI2dYCF5vmYtj-QKY5_p_d3fx2D-t_dv83dzzz8VHn3e5fmckcKCdQ58tDfn9bRKb-5IO9-78v4v09l_rk2_eTVn_pcvr7B-uft87_XU-9_fAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEQagCzDQqIA-yJCQi0DCKBACIKwgIoEAAAAJA0QEAJAwKdgYBLrCRACBFAAMEAIAAUZAAgAAEgAQiACQAoEAAEAgEAAAAAAgEADAwADgAtBAIAAQHQMUwoAFAsIEiMiIUwIQoEggJbKBBICgQVwgCLDAigERMFAAgCQAVgAAAsVgMASAlYkECWUG0AABAAgFFKFQik6MAQwJmy1U4om0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAACAA.YAAAAAAAAAAA',
+        eids: [
+          {
+            source: 'pubcid.org',
+            uids: [{ 'id': 'f5debac9-9a8e-4c08-9820-51e96b69f858', 'atype': 1 }]
+          }
+        ]
+      }
+    },
+    device: {
+      w: 412,
+      h: 915,
+      dnt: 0,
+      ua: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
+      language: 'en',
+      ext: { vpw: 412, vph: 915 },
+      sua: {
+        source: 1,
+        platform: { brand: 'Android' },
+        browsers: [{ brand: 'Google Chrome', version: ['131'] }],
+        mobile: 1
+      }
+    }
+  };
+
+  bidderRequestBase = {
+    bids: bidRequests,
+    bidderRequestId: 'mock-uuid',
+    auctionId: bidRequests[0].auctionId,
+    gdprConsent: { consentString: 'myConsentString', vendorData: {}, gdprApplies: true },
+    gppConsent: { gppString: 'myGppString', gppData: {}, applicableSections: [7], parsedSections: {} },
+    timeout: 1000,
+    refererInfo: { page: currentLocation },
+    ortb2
+  };
+
+  describe('isBidRequestValid', () => {
+    it('should validate correct bid', () => {
+      let validBid = utils.deepClone(bidRequests[0]);
+
+      let isValid = spec.isBidRequestValid(validBid);
+      expect(isValid).to.true;
+    });
+
+    it('should not validate when sizes is not defined', () => {
+      let invalidBid = utils.deepClone(bidRequests[0]);
+      delete invalidBid.sizes;
+      delete invalidBid.mediaTypes;
+
+      let isValid = spec.isBidRequestValid(invalidBid);
+      expect(isValid).to.be.false;
+    });
+
+    it('should not validate bid when adunit is not defined', () => {
+      let invalidBid = utils.deepClone(bidRequests[0]);
+      delete invalidBid.params.adUnitId;
+
+      let isValid = spec.isBidRequestValid(invalidBid);
+      expect(isValid).to.to.be.false;
+    });
+
+    it('should not validate bid when assetKey is not defined', () => {
+      let invalidBid = utils.deepClone(bidRequests[0]);
+      delete invalidBid.params.assetKey;
+
+      let isValid = spec.isBidRequestValid(invalidBid);
+      expect(isValid).to.be.false;
+    });
+
+    it('should validate the request when only publisherId and adUnitCode is defined', () => {
+      const validBid = utils.deepClone(bidRequests[0]);
+      delete validBid.params.adUnitId;
+      delete validBid.params.assetKey;
+
+      validBid.ortb2 = { site: { publisher: { id: 'publisherId' } } };
+
+      expect(spec.isBidRequestValid(validBid)).to.be.true;
+    });
+
+    it('should not validate the request when only publisherId is defined', () => {
+      const invalidBid = utils.deepClone(bidRequests[0]);
+      delete invalidBid.params.adUnitId;
+      delete invalidBid.params.assetKey;
+      delete invalidBid.adUnitCode;
+
+      invalidBid.ortb2 = { site: { publisher: { id: 'publisherId' } } };
+
+      expect(spec.isBidRequestValid(invalidBid)).to.be.false;
+    });
+
+    it('should not validate the request when only adUnitCode is defined', () => {
+      const invalidBid = utils.deepClone(bidRequests[0]);
+      delete invalidBid.params.adUnitId;
+      delete invalidBid.params.assetKey;
+
+      expect(spec.isBidRequestValid(invalidBid)).to.be.false;
+    });
+  });
+
+  describe('getUserSyncs', () => {
+    let syncOptions, gdprConsent, gppConsent, uspConsent;
+
+    beforeEach(() => {
+      gdprConsent = {
+        gdprApplies: true,
+        consentString: 'CPJl4C8PJl4C8OoAAAENAwCMAP_AAH_AAAAAAPgAAAAIAPgAAAAIAAA.IGLtV_T9fb2vj-_Z99_tkeYwf95y3p-wzhheMs-8NyZeH_B4Wv2MyvBX4JiQKGRgksjLBAQdtHGlcTQgBwIlViTLMYk2MjzNKJrJEilsbO2dYGD9Pn8HT3ZCY70-vv__7v3ff_3g'
+      };
+      gppConsent = {
+        gppString: 'DBABLA~BAAAAAAAAQA.QA',
+        applicableSections: [7]
+      };
+      uspConsent = '1YNY';
+    });
+
+    describe('pixel', () => {
+      beforeEach(() => {
+        syncOptions = { pixelEnabled: true };
+      });
+
+      it('should return syncs array with one element of type image', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+        expect(userSyncs[0].url).to.contain('https://ms-cookie-sync.presage.io/user-sync');
+      });
+
+      it('should set the source as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('source')).to.equal('prebid');
+      });
+
+      it('should set the tcString as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal(gdprConsent.consentString);
+      });
+
+      it('should set the gppString as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('gpp')).to.equal(gppConsent.gppString);
+      });
+
+      it('should set the gpp_sid as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('gpp_sid')).to.equal(gppConsent.applicableSections.toString());
+      });
+
+      it('should set the us privacy consentString as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('us_privacy')).to.equal(uspConsent);
+      });
+
+      it('should return an empty array when pixel is disable', () => {
+        syncOptions.pixelEnabled = false;
+        expect(spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent)).to.have.lengthOf(0);
+      });
+
+      it('should return syncs array with three elements of type image when consentString is undefined', () => {
+        gdprConsent = {
+          gdprApplies: true,
+          consentString: undefined
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when consentString is null', () => {
+        gdprConsent = {
+          gdprApplies: true,
+          consentString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gdprConsent is undefined', () => {
+        gdprConsent = undefined;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gdprConsent is null', () => {
+        gdprConsent = null;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gdprConsent is null and gdprApplies is false', () => {
+        gdprConsent = {
+          gdprApplies: false,
+          consentString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gdprConsent is empty string and gdprApplies is false', () => {
+        gdprConsent = {
+          gdprApplies: false,
+          consentString: ''
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gppString is undefined', () => {
+        gppConsent = {
+          applicableSections: [7],
+          gppString: undefined
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('gpp')).to.equal('');
+        expect(firstUrlSync.get('gpp_sid')).to.equal(gppConsent.applicableSections.toString());
+      });
+
+      it('should return syncs array with three elements of type image when gppString is null', () => {
+        gppConsent = {
+          applicableSections: [7, 8],
+          gppString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('gpp')).to.equal('');
+        expect(firstUrlSync.get('gpp_sid')).to.equal(gppConsent.applicableSections.toString());
+      });
+
+      it('should return syncs array with three elements of type image when gppConsent is undefined', () => {
+        gppConsent = undefined;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('gpp')).to.equal('');
+        expect(firstUrlSync.get('gpp_sid')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when uspConsent is undefined', () => {
+        uspConsent = undefined;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('us_privacy')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gppConsent is null', () => {
+        gppConsent = null;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('gpp')).to.equal('');
+        expect(firstUrlSync.get('gpp_sid')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when uspConsent is null', () => {
+        uspConsent = null;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('us_privacy')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gppConsent is null and applicableSections is empty', () => {
+        gppConsent = {
+          applicableSections: [],
+          gppString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('gpp')).to.equal('');
+        expect(firstUrlSync.get('gpp_sid')).to.equal('');
+      });
+
+      it('should return syncs array with three elements of type image when gppString is empty string and applicableSections is empty', () => {
+        gppConsent = {
+          applicableSections: [],
+          gppString: ''
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('image');
+
+        const firstUrlSync = new URL(userSyncs[0].url).searchParams;
+        expect(firstUrlSync.get('gpp')).to.equal('');
+        expect(firstUrlSync.get('gpp_sid')).to.equal('');
+      });
+    });
+
+    describe('iframe', () => {
+      beforeEach(() => {
+        syncOptions = { iframeEnabled: true };
+      });
+
+      it('should return syncs array with one element of type iframe', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+        expect(userSyncs[0].url).to.contain('https://ms-cookie-sync.presage.io/user-sync.html');
+      });
+
+      it('should set the source as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('source')).to.equal('prebid');
+      });
+
+      it('should set the tcString as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal(gdprConsent.consentString);
+      });
+
+      it('should set the gppString as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('gpp')).to.equal(gppConsent.gppString);
+      });
+
+      it('should set the us privacy consentString as query param', () => {
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(new URL(userSyncs[0].url).searchParams.get('us_privacy')).to.equal(uspConsent);
+      });
+
+      it('should return an empty array when iframe is disable', () => {
+        syncOptions.iframeEnabled = false;
+        expect(spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent)).to.have.lengthOf(0);
+      });
+
+      it('should return syncs array with one element of type iframe when consentString is undefined', () => {
+        gdprConsent = {
+          gdprApplies: true,
+          consentString: undefined
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when consentString is null', () => {
+        gdprConsent = {
+          gdprApplies: true,
+          consentString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gdprConsent is undefined', () => {
+        gdprConsent = undefined;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gdprConsent is null', () => {
+        gdprConsent = null;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gdprConsent is null and gdprApplies is false', () => {
+        gdprConsent = {
+          gdprApplies: false,
+          consentString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gdprConsent is empty string and gdprApplies is false', () => {
+        gdprConsent = {
+          gdprApplies: false,
+          consentString: ''
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+        expect(new URL(userSyncs[0].url).searchParams.get('gdpr_consent')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gppConsent is empty string and applicableSections is empty', () => {
+        gppConsent = {
+          applicableSections: [],
+          gppString: ''
+        };
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('gpp')).to.equal('');
+        expect(urlParams.get('gpp_sid')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gppString is undefined', () => {
+        gppConsent = {
+          applicableSections: [7],
+          gppString: undefined
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('gpp')).to.equal('');
+        expect(urlParams.get('gpp_sid')).to.equal(gppConsent.applicableSections.toString());
+      });
+
+      it('should return syncs array with one element of type iframe when gppString is null', () => {
+        gppConsent = {
+          applicableSections: [7],
+          gppString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('gpp')).to.equal('');
+        expect(urlParams.get('gpp_sid')).to.equal(gppConsent.applicableSections.toString());
+      });
+
+      it('should return syncs array with one element of type iframe when gppConsent is undefined', () => {
+        gppConsent = undefined;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('gpp')).to.equal('');
+        expect(urlParams.get('gpp_sid')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when uspConsent is undefined', () => {
+        uspConsent = undefined;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('us_privacy')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gppConsent is null', () => {
+        gppConsent = null;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('gpp')).to.equal('');
+        expect(urlParams.get('gpp_sid')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when uspConsent is null', () => {
+        uspConsent = null;
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('us_privacy')).to.equal('');
+      });
+
+      it('should return syncs array with one element of type iframe when gppConsent is null and applicableSections is empty', () => {
+        gppConsent = {
+          applicableSections: [],
+          gppString: null
+        };
+
+        const userSyncs = spec.getUserSyncs(syncOptions, [], gdprConsent, uspConsent, gppConsent);
+        expect(userSyncs).to.have.lengthOf(1);
+        expect(userSyncs[0].type).to.equal('iframe');
+
+        const urlParams = new URL(userSyncs[0].url).searchParams;
+        expect(urlParams.get('gpp')).to.equal('');
+        expect(urlParams.get('gpp_sid')).to.equal('');
+      });
+    });
+  });
+
+  describe('buildRequests', () => {
+    let windowTopStub;
+    const stubbedCurrentTime = 1234567890;
+    const stubbedDevicePixelRatio = 1;
+    const stubbedCurrentTimeMethod = sinon.stub(document.timeline, 'currentTime').get(function() {
+      return stubbedCurrentTime;
+    });
+
+    const defaultTimeout = 1000;
+
+    function assertImpObject(ortbBidRequest, bidRequest) {
+      expect(ortbBidRequest.secure).to.equal(1);
+      expect(ortbBidRequest.id).to.equal(bidRequest.bidId);
+      expect(ortbBidRequest.tagid).to.equal(bidRequest.adUnitCode);
+      expect(ortbBidRequest.banner).to.deep.equal({
+        topframe: 0,
+        format: [{
+          w: bidRequest.mediaTypes.banner.sizes[0][0],
+          h: bidRequest.mediaTypes.banner.sizes[0][1],
+        }]
+      });
+
+      expect(ortbBidRequest.ext).to.deep.equal({
+        ...bidRequest.params,
+        gpid: bidRequest.ortb2Imp?.ext.gpid || bidRequest.adUnitCode,
+        timeSpentOnPage: stubbedCurrentTime
+      });
+    }
+
+    function assertRequestObject(dataRequest) {
+      expect(dataRequest.id).to.be.a('string');
+      expect(dataRequest.tmax).to.equal(defaultTimeout);
+
+      assertImpObject(dataRequest.imp[0], bidRequests[0]);
+      assertImpObject(dataRequest.imp[1], bidRequests[1]);
+
+      expect(dataRequest.imp[0].bidfloor).to.equal(4);
+      expect(dataRequest.regs).to.deep.equal(ortb2.regs);
+      expect(dataRequest.site).to.deep.equal({
+        ...ortb2.site,
+        page: currentLocation,
+        id: bidRequests[0].params.assetKey
+      });
+
+      expect(dataRequest.user).to.deep.equal({
+        ext: {
+          ...ortb2.user.ext
+        }
+      });
+
+      expect(dataRequest.ext).to.deep.equal({
+        prebidversion: '$prebid.version$',
+        adapterversion: '2.1.2'
+      });
+
+      expect(dataRequest.device).to.deep.equal({
+        ...ortb2.device,
+        pxratio: stubbedDevicePixelRatio,
+      });
+
+      expect(dataRequest.regs.ext.gdpr).to.be.a('number');
+      expect(dataRequest.device.pxratio).to.be.a('number');
+    }
+
+    beforeEach(() => {
+      windowTopStub = sinon.stub(utils, 'getWindowTop');
+      windowTopStub.returns({ location: { href: currentLocation }, devicePixelRatio: stubbedDevicePixelRatio });
+    });
+
+    afterEach(() => {
+      windowTopStub.restore();
+    });
+
+    after(() => {
+      stubbedCurrentTimeMethod.restore();
+    });
+
+    it('sends bid request to ENDPOINT via POST', function () {
+      const request = spec.buildRequests(bidRequests, bidderRequestBase);
+      expect(request.url).to.equal(BID_URL);
+      expect(request.method).to.equal('POST');
+    });
+
+    it('timeSpentOnpage should be 0 if timeline is undefined', function () {
+      const stubbedTimelineMethod = sinon.stub(document, 'timeline').get(function() {
+        return undefined;
+      });
+
+      const request = spec.buildRequests(bidRequests, bidderRequestBase);
+      expect(request.data.imp[0].ext.timeSpentOnPage).to.equal(0);
+      stubbedTimelineMethod.restore();
+    });
+
+    it('bid request object should be conform', function () {
+      const request = spec.buildRequests(bidRequests, bidderRequestBase);
+      assertRequestObject(request.data);
+    });
+
+    it('should not set site.id when assetKey is not present', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      const validBidRequests = bidderRequest.bids;
+      delete validBidRequests[0].params.assetKey;
+      delete validBidRequests[1].params.assetKey;
+
+      const request = spec.buildRequests(validBidRequests, bidderRequest);
+      expect(request.data.site.id).to.be.an('undefined');
+    });
+
+    it('should handle bidFloor undefined', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      const validBidRequests = bidderRequest.bids;
+      validBidRequests[0] = {
+        ...validBidRequests[0],
+        getFloor: undefined
+      };
+
+      const request = spec.buildRequests(validBidRequests, bidderRequest);
+      expect(request.data.imp[0].bidfloor).to.be.an('undefined');
+    });
+
+    it('should handle bidFloor when is not function', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      const validBidRequests = bidderRequest.bids;
+      validBidRequests[0] = {
+        ...validBidRequests[0],
+        getFloor: 'getFloor'
+      };
+
+      const request = spec.buildRequests(validBidRequests, bidderRequest);
+      expect(request.data.imp[0].bidfloor).to.be.an('undefined');
+    });
+
+    it('should handle bidFloor when currency is not USD', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      const validBidRequests = bidderRequest.bids;
+
+      validBidRequests[0] = {
+        ...validBidRequests[0],
+        getFloor: ({ size, currency, mediaType }) => {
+          return {
+            currency: 'EUR',
+            floor: 4
+          };
+        }
+      };
+
+      const request = spec.buildRequests(validBidRequests, bidderRequest);
+      expect(request.data.imp[0].bidfloor).to.be.an('undefined');
+    });
+
+    it('should use adUnitCode when gpid from ortb2 is undefined', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      const validBidRequests = bidderRequest.bids;
+      delete validBidRequests[0].ortb2Imp.ext.gpid;
+
+      const request = spec.buildRequests(validBidRequests, bidderRequest);
+      expect(request.data.imp[0].ext.gpid).to.equal(bidRequests[0].adUnitCode);
+    });
+
+    it('should use adUnitCode when gpid is not present in ortb2Imp object', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      const validBidRequests = bidderRequest.bids;
+      validBidRequests[0] = {
+        ...validBidRequests[0],
+        ortb2Imp: {
+          ext: {}
+        }
+      };
+
+      const request = spec.buildRequests(validBidRequests, bidderRequest);
+      expect(request.data.imp[0].ext.gpid).to.equal(bidRequests[0].adUnitCode);
+    });
+
+    it('should keep the publisher provided site.page instead of overriding it with the current location', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = 'https://publisher.com/custom-page-url';
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal('https://publisher.com/custom-page-url');
+    });
+
+    it('should not throw and should keep site.page when the top window location is not readable (cross-origin iframe)', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = 'https://publisher-page.example/article';
+
+      windowTopStub.returns({
+        get location() {
+          throw new DOMException('Blocked a frame with origin "https://frame.publisher-page.example" from accessing a cross-origin frame.', 'SecurityError');
+        },
+        devicePixelRatio: stubbedDevicePixelRatio
+      });
+
+      expect(() => spec.buildRequests(bidRequests, bidderRequest)).to.not.throw();
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal('https://publisher-page.example/article');
+    });
+
+    it('should repair a publisher site.page sent as a bare hostname, restoring the page path', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = 'www.publisher.com';
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal(currentLocation);
+    });
+
+    it('should repair a bare hostname even when it carries a path, since the scheme is what fails validation', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = 'www.publisher.com/article-123?a=b';
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal(currentLocation);
+    });
+
+    it('should repair a protocol-relative site.page', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = '//www.publisher.com/article-123';
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal(currentLocation);
+    });
+
+    it('should keep an http site.page as provided', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = 'http://www.publisher.com/article-123';
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal('http://www.publisher.com/article-123');
+    });
+
+    it('should leave a malformed site.page untouched when refererInfo has no page to offer', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = 'www.publisher.com';
+      bidderRequest.refererInfo = {};
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal('www.publisher.com');
+    });
+
+    // tripwire: request() has to resolve the page without reading the top window, which throws here
+    it('should resolve site.page without any top-window location read', () => {
+      const bidderRequest = utils.deepClone(bidderRequestBase);
+      bidderRequest.ortb2.site.page = 'www.publisher.com';
+      bidderRequest.refererInfo = { page: 'https://www.publisher.com/article-123' };
+
+      windowTopStub.returns({
+        get location() {
+          throw new DOMException('Blocked a frame with origin "https://frame.publisher.com" from accessing a cross-origin frame.', 'SecurityError');
+        },
+        devicePixelRatio: stubbedDevicePixelRatio
+      });
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.site.page).to.equal('https://www.publisher.com/article-123');
+    });
+  });
+
+  describe('interpretResponse', function () {
+    let openRtbBidResponse = {
+      body: {
+        id: 'id_of_bid_response',
+        seatbid: [{
+          bid: [{
+            id: 'advertId',
+            impid: 'bidId',
+            price: 100,
+            mtype: 1,
+            nurl: 'url',
+            adm: `<div><img style="width: 300px; height: 250px;" src="https://assets.afcdn.com/recipe/20190529/93153_w1024h768c1cx2220cy1728cxt0cyt0cxb4441cyb3456.jpg" alt="cookies" /></div>`,
+            adomain: ['renault.fr'],
+            ext: {
+              adcontent: 'sample_creative',
+              advertid: '1a278c48-b79a-4bbf-b69f-3824803e7d87',
+              campaignid: '31724',
+              mediatype: 'image',
+              userid: 'ab4aabed-5230-49d9-9f1a-f06280d28366',
+              usersync: true,
+              advertiserid: '1',
+              isomidcompliant: false
+            },
+            w: 180,
+            h: 101
+          }, {
+            id: 'advertId2',
+            impid: 'bidId2',
+            price: 150,
+            mtype: 1,
+            nurl: 'url2',
+            adm: `<div><img style="width: 600px; height: 500px;" src="https://assets.afcdn.com/recipe/20190529/93153_w1024h768c1cx2220cy1728cxt0cyt0cxb4441cyb3456.jpg" alt="cookies" /></div>`,
+            adomain: ['peugeot.fr'],
+            ext: {
+              adcontent: 'sample_creative',
+              advertid: '2a278c48-b79a-4bbf-b69f-3824803e7d87',
+              campaignid: '41724',
+              userid: 'bb4aabed-5230-49d9-9f1a-f06280d28366',
+              usersync: false,
+              advertiserid: '2',
+              isomidcompliant: true,
+              mediatype: 'image',
+              landingpageurl: 'https://ogury.com'
+            },
+            w: 600,
+            h: 500
+          }],
+        }]
+      }
+    };
+
+    function assertPrebidBidResponse(prebidBidResponse, ortbResponse) {
+      expect(prebidBidResponse.ttl).to.equal(60);
+      expect(prebidBidResponse.currency).to.equal('USD');
+      expect(prebidBidResponse.netRevenue).to.be.true;
+      expect(prebidBidResponse.mediaType).to.equal('banner');
+      expect(prebidBidResponse.requestId).to.equal(ortbResponse.impid);
+      expect(prebidBidResponse.cpm).to.equal(ortbResponse.price);
+      expect(prebidBidResponse.width).to.equal(ortbResponse.w);
+      expect(prebidBidResponse.height).to.equal(ortbResponse.h);
+      expect(prebidBidResponse.ad).to.contain(ortbResponse.adm);
+      expect(prebidBidResponse.meta.advertiserDomains).to.deep.equal(ortbResponse.adomain);
+      expect(prebidBidResponse.seatBidId).to.equal(ortbResponse.id);
+      expect(prebidBidResponse.nurl).to.equal(ortbResponse.nurl);
+    }
+
+    it('should correctly interpret bidResponse', () => {
+      const request = spec.buildRequests(bidRequests, bidderRequestBase);
+      const result = spec.interpretResponse(utils.deepClone(openRtbBidResponse), request);
+
+      assertPrebidBidResponse(result[0], openRtbBidResponse.body.seatbid[0].bid[0]);
+      assertPrebidBidResponse(result[1], openRtbBidResponse.body.seatbid[0].bid[1]);
+    });
+  });
+
+  describe('ortbConverterProps.bidResponse', () => {
+    it('should call buildBidResponse without nurl and return nurl into bidResponse to call it via ajax', () => {
+      const bidResponse = { adUnitCode: 'adUnitCode', cpm: 10, adapterCode: 'ogury', width: 1, height: 1 };
+      const buildBidResponse = () => bidResponse;
+      const buildBidResponseSpy = sinon.spy(buildBidResponse);
+
+      const bid = { nurl: 'http://url.co/win' };
+
+      expect(ortbConverterProps.bidResponse(buildBidResponseSpy, utils.deepClone(bid), {})).to.deep.equal({
+        ...bidResponse,
+        currency: 'USD',
+        nurl: bid.nurl
+      });
+
+      sinon.assert.calledWith(buildBidResponseSpy, {}, {});
+    });
+  });
+
+  describe('onBidWon', function() {
+    const nurl = 'https://fakewinurl.test/';
+    let requests;
+
+    beforeEach(function() {
+      requests = server.requests;
+    });
+
+    it('Should not create nurl request if bid is undefined', function() {
+      spec.onBidWon();
+      expect(requests.length).to.equal(0);
+    });
+
+    it('Should not create nurl request if bid does not contains nurl', function() {
+      spec.onBidWon({});
+      expect(requests.length).to.equal(0);
+    });
+
+    it('Should not create nurl request if bid contains undefined nurl', function() {
+      spec.onBidWon({ nurl: undefined });
+      expect(requests.length).to.equal(0);
+    });
+
+    it('Should create nurl request if bid nurl', function() {
+      spec.onBidWon({ nurl });
+      expect(requests.length).to.equal(1);
+      expect(requests[0].url).to.equal(nurl);
+      expect(requests[0].method).to.equal('GET');
+    });
+
+    it('Should still send the nurl ping when writing OG_PREBID_BID_OBJECT on the top window throws (cross-origin iframe)', function() {
+      const frozenTopWindow = Object.freeze({});
+      const windowTopStub = sinon.stub(utils, 'getWindowTop');
+      windowTopStub.returns(frozenTopWindow);
+
+      try {
+        spec.onBidWon({ nurl });
+      } finally {
+        windowTopStub.restore();
+      }
+
+      expect(requests.length).to.equal(1);
+      expect(requests[0].url).to.equal(nurl);
+    });
+
+    it('Should trigger getWindowContext method', function() {
+      const bidSample = {
+        id: 'advertId',
+        impid: 'bidId',
+        price: 100,
+        nurl: 'url',
+        adm: `<html><head><title>test creative</title></head><body style="margin: 0;"><div><img style="width: 300px; height: 250px;" src="https://assets.afcdn.com/recipe/20190529/93153_w1024h768c1cx2220cy1728cxt0cyt0cxb4441cyb3456.jpg" alt="cookies" /></div></body></html>`,
+        adomain: ['renault.fr'],
+        ext: {
+          adcontent: 'sample_creative',
+          advertid: '1a278c48-b79a-4bbf-b69f-3824803e7d87',
+          campaignid: '31724',
+          mediatype: 'image',
+          userid: 'ab4aabed-5230-49d9-9f1a-f06280d28366',
+          usersync: true,
+          advertiserid: '1',
+          isomidcompliant: false
+        },
+        w: 180,
+        h: 101
+      };
+      spec.onBidWon(bidSample);
+      expect(window.top.OG_PREBID_BID_OBJECT).to.deep.equal(bidSample);
+    });
+  });
+
+  describe('getWindowContext', function() {
+    it('Should return top window if exist', function() {
+      const res = spec.getWindowContext();
+      expect(res).to.equal(window.top);
+      expect(res).to.not.be.undefined;
+    });
+
+    it('Should return self window if getting top window throw an error', function() {
+      const stub = sinon.stub(utils, 'getWindowTop');
+      stub.throws();
+      const res = spec.getWindowContext();
+      expect(res).to.equal(window.self);
+      utils.getWindowTop.restore();
+    });
+  });
+
+  describe('onTimeout', function () {
+    let requests;
+
+    beforeEach(function() {
+      requests = server.requests;
+      server.onCreate = (xhr) => {
+        requests.push(xhr);
+      };
+    });
+
+    it('should send on bid timeout notification', function() {
+      const bid = {
+        ad: '<img style="width: 300px; height: 250px;" src="https://assets.afcdn.com/recipe/20190529/93153_w1024h768c1cx2220cy1728cxt0cyt0cxb4441cyb3456.jpg" alt="cookies" />',
+        cpm: 3
+      };
+      spec.onTimeout(bid);
+      expect(requests).to.not.be.undefined;
+      expect(requests.length).to.equal(1);
+      expect(requests[0].url).to.equal(TIMEOUT_URL);
+      expect(requests[0].method).to.equal('POST');
+      expect(JSON.parse(requests[0].requestBody).location).to.equal(getRefererInfo().page);
+    });
+
+    it('should report the same page URL as buildRequests when ortb2.site.page diverges from refererInfo', function() {
+      const bid = {
+        ad: '<img style="width: 300px; height: 250px;" src="https://assets.afcdn.com/recipe/20190529/93153_w1024h768c1cx2220cy1728cxt0cyt0cxb4441cyb3456.jpg" alt="cookies" />',
+        cpm: 3,
+        ortb2: { site: { page: 'https://publisher.com/custom-page-url' } }
+      };
+
+      spec.onTimeout([bid]);
+
+      expect(requests.length).to.equal(1);
+      // request() sends ortb2.site.page, so timeout monitoring must report the same URL
+      expect(JSON.parse(requests[0].requestBody).location).to.equal('https://publisher.com/custom-page-url');
+      expect(JSON.parse(requests[0].requestBody).location).to.not.equal(getRefererInfo().page);
+    });
+
+    it('should report the resolved page, not the raw ortb2.site.page, when the publisher value is not an absolute URL', function() {
+      const bid = {
+        ad: '<img src="https://assets.example/creative.jpg" alt="creative" />',
+        cpm: 3,
+        ortb2: { site: { page: 'www.publisher.com' } }
+      };
+
+      spec.onTimeout([bid]);
+
+      expect(requests.length).to.equal(1);
+      // request() repairs a schemeless site.page, so monitoring must report the repaired URL
+      expect(JSON.parse(requests[0].requestBody).location).to.equal(getRefererInfo().page);
+      expect(JSON.parse(requests[0].requestBody).location).to.not.equal('www.publisher.com');
+    });
+  });
+
+  describe('video support', () => {
+    let videoBidRequest;
+    let mixedBidRequest;
+    let windowTopStub;
+
+    beforeEach(() => {
+      videoBidRequest = {
+        adUnitCode: 'adUnitCodeVideo',
+        ortb2Imp: { ext: { gpid: 'gpidVideo' } },
+        auctionId: 'auctionId',
+        bidId: 'bidIdVideo',
+        bidder: 'ogury',
+        params: {
+          assetKey: 'OGY-assetkey',
+          adUnitId: 'adunitIdVideo'
+        },
+        mediaTypes: {
+          video: {
+            playerSize: [[640, 480]],
+            context: 'outstream',
+            mimes: ['video/mp4'],
+            protocols: [2, 3, 5, 6]
+          }
+        },
+        getFloor: ({ mediaType }) => ({
+          currency: 'USD',
+          floor: mediaType === 'video' ? 7 : 3
+        }),
+        transactionId: 'transactionIdVideo'
+      };
+
+      mixedBidRequest = utils.deepClone(bidRequests[0]);
+      mixedBidRequest.mediaTypes.video = {
+        playerSize: [[640, 480]],
+        context: 'outstream',
+        mimes: ['video/mp4']
+      };
+
+      windowTopStub = sinon.stub(utils, 'getWindowTop');
+      windowTopStub.returns({ location: { href: currentLocation }, devicePixelRatio: 1 });
+    });
+
+    afterEach(() => {
+      windowTopStub.restore();
+    });
+
+    describe('supportedMediaTypes', () => {
+      it('should declare both BANNER and VIDEO', () => {
+        expect(spec.supportedMediaTypes).to.include.members(['banner', 'video']);
+      });
+    });
+
+    describe('isBidRequestValid', () => {
+      it('should validate a video-only bid with playerSize', () => {
+        expect(spec.isBidRequestValid(videoBidRequest)).to.be.true;
+      });
+
+      it('should not validate a video-only bid without playerSize', () => {
+        const invalidBid = utils.deepClone(videoBidRequest);
+        delete invalidBid.mediaTypes.video.playerSize;
+        expect(spec.isBidRequestValid(invalidBid)).to.be.false;
+      });
+
+      it('should not validate a video-only bid with empty playerSize', () => {
+        const invalidBid = utils.deepClone(videoBidRequest);
+        invalidBid.mediaTypes.video.playerSize = [];
+        expect(spec.isBidRequestValid(invalidBid)).to.be.false;
+      });
+
+      it('should validate a mixed banner+video bid', () => {
+        expect(spec.isBidRequestValid(mixedBidRequest)).to.be.true;
+      });
+
+      it('should validate a video-only bid using publisherId + adUnitCode flow', () => {
+        const validBid = utils.deepClone(videoBidRequest);
+        delete validBid.params.adUnitId;
+        delete validBid.params.assetKey;
+        validBid.ortb2 = { site: { publisher: { id: 'publisherId' } } };
+        expect(spec.isBidRequestValid(validBid)).to.be.true;
+      });
+
+      it('should not validate a bid with empty mediaTypes.banner and no video', () => {
+        // Guard the edge case where mediaTypes.banner is declared but carries no
+        // sizes. isBidRequestValid must reject it — neither banner sizes nor
+        // video playerSize are present. This keeps getFloor's banner detection
+        // (Boolean(mediaTypes.banner)) safe: a malformed bid never reaches it.
+        const invalidBid = utils.deepClone(bidRequests[0]);
+        invalidBid.mediaTypes = { banner: {} };
+        delete invalidBid.sizes;
+        expect(spec.isBidRequestValid(invalidBid)).to.be.false;
+      });
+    });
+
+    if (FEATURES.VIDEO) {
+      describe('buildRequests', () => {
+        it('should build imp.video from mediaTypes.video.playerSize', () => {
+          const request = spec.buildRequests([videoBidRequest], { ...bidderRequestBase, bids: [videoBidRequest] });
+          expect(request.data.imp[0].video).to.exist;
+          expect(request.data.imp[0].video.w).to.equal(640);
+          expect(request.data.imp[0].video.h).to.equal(480);
+          expect(request.data.imp[0].banner).to.be.an('undefined');
+        });
+
+        it('should set imp.bidfloor from video floor for video-only bids', () => {
+          const request = spec.buildRequests([videoBidRequest], { ...bidderRequestBase, bids: [videoBidRequest] });
+          expect(request.data.imp[0].bidfloor).to.equal(7);
+        });
+
+        it('should build both imp.banner and imp.video for mixed bids', () => {
+          const request = spec.buildRequests([mixedBidRequest], { ...bidderRequestBase, bids: [mixedBidRequest] });
+          expect(request.data.imp[0].banner).to.exist;
+          expect(request.data.imp[0].video).to.exist;
+        });
+
+        it('should use banner floor on mixed banner+video bids (preserves pre-video banner behavior)', () => {
+          const request = spec.buildRequests([mixedBidRequest], { ...bidderRequestBase, bids: [mixedBidRequest] });
+          expect(request.data.imp[0].bidfloor).to.equal(4);
+        });
+
+        it('should use banner floor on mixed bids even when video floor is higher', () => {
+          const bid = utils.deepClone(mixedBidRequest);
+          bid.getFloor = ({ mediaType }) => ({
+            currency: 'USD',
+            floor: mediaType === 'video' ? 10 : 5
+          });
+
+          const request = spec.buildRequests([bid], { ...bidderRequestBase, bids: [bid] });
+          expect(request.data.imp[0].bidfloor).to.equal(5);
+        });
+
+        it('should not set imp.bidfloor on a video-only bid when getFloor is not a function', () => {
+          const bid = utils.deepClone(videoBidRequest);
+          bid.getFloor = undefined;
+
+          const request = spec.buildRequests([bid], { ...bidderRequestBase, bids: [bid] });
+          expect(request.data.imp[0].bidfloor).to.be.an('undefined');
+        });
+
+        it('should query video floor on a video-only bid even when bid.sizes is auto-populated from playerSize', () => {
+          // Prebid populates bid.sizes from mediaTypes.video.playerSize when no
+          // banner mediaType is declared. The adapter must not interpret that as
+          // a banner imp — banner detection lives on mediaTypes.banner, not on
+          // bid.sizes / getAdUnitSizes.
+          const bid = utils.deepClone(videoBidRequest);
+          bid.sizes = [[640, 480]];
+          bid.getFloor = ({ mediaType }) => ({
+            currency: 'USD',
+            floor: mediaType === 'video' ? 9 : 2
+          });
+
+          const request = spec.buildRequests([bid], { ...bidderRequestBase, bids: [bid] });
+          expect(request.data.imp[0].bidfloor).to.equal(9);
+        });
+
+        it('should not query video floor when mediaTypes.video is declared without playerSize', () => {
+          const bid = utils.deepClone(bidRequests[0]);
+          bid.mediaTypes.video = { context: 'outstream', mimes: ['video/mp4'] };
+          bid.getFloor = ({ mediaType }) => ({
+            currency: 'USD',
+            floor: mediaType === 'video' ? 1 : 6
+          });
+
+          const request = spec.buildRequests([bid], { ...bidderRequestBase, bids: [bid] });
+          expect(request.data.imp[0].bidfloor).to.equal(6);
+        });
+
+        it('should pass mediaType:"banner" to getFloor on a banner-only bid (ISO with pre-video behaviour)', () => {
+          // Blindage non-régression banner: detect that the new
+          // Boolean(mediaTypes.banner) check still routes pure banner bids to
+          // the banner floor query. If a future refactor reverses the
+          // hasBanner/hasVideo branching, this test will fail.
+          // We exercise spec.getFloor directly (not via buildRequests) to
+          // isolate the adapter's own getFloor invocation from the
+          // ortbConverter auto-floor processor (which also calls
+          // bid.getFloor when the priceFloors module is loaded by a sibling
+          // spec in the same Karma chunk).
+          const bid = utils.deepClone(bidRequests[0]);
+          const calls = [];
+          bid.getFloor = (args) => {
+            calls.push(args);
+            return { currency: 'USD', floor: 3 };
+          };
+
+          const floor = spec.getFloor(bid);
+          expect(calls).to.have.lengthOf(1);
+          expect(calls[0].mediaType).to.equal('banner');
+          expect(calls[0].size).to.equal('*');
+          expect(floor).to.equal(3);
+        });
+
+        it('should query banner floor with size:"*" (wildcard) rather than iterating per banner size', () => {
+          const bid = utils.deepClone(bidRequests[0]);
+          bid.mediaTypes.banner.sizes = [[300, 250], [728, 90]];
+          bid.getFloor = ({ size }) => {
+            if (size === '*') {
+              return { currency: 'USD', floor: 99 };
+            }
+            return { currency: 'USD', floor: 1 };
+          };
+
+          const request = spec.buildRequests([bid], { ...bidderRequestBase, bids: [bid] });
+          expect(request.data.imp[0].bidfloor).to.equal(99);
+        });
+      });
+
+      describe('interpretResponse', () => {
+        it('should mark bidResponse.mediaType as video for a video imp', () => {
+          const request = spec.buildRequests([videoBidRequest], { ...bidderRequestBase, bids: [videoBidRequest] });
+          const videoOrtbResponse = {
+            body: {
+              id: 'video_response',
+              seatbid: [{
+                bid: [{
+                  id: 'advertIdVideo',
+                  impid: 'bidIdVideo',
+                  price: 12,
+                  mtype: 2,
+                  nurl: 'urlVideo',
+                  adm: '<VAST version="3.0"><Ad></Ad></VAST>',
+                  adomain: ['ogury.com'],
+                  w: 640,
+                  h: 480
+                }]
+              }]
+            }
+          };
+
+          const result = spec.interpretResponse(videoOrtbResponse, request);
+          expect(result).to.have.lengthOf(1);
+          expect(result[0].mediaType).to.equal('video');
+          expect(result[0].vastXml).to.contain('<VAST');
+        });
+      });
+
+      describe('instream', () => {
+        let instreamBidRequest;
+
+        beforeEach(() => {
+          instreamBidRequest = utils.deepClone(videoBidRequest);
+          instreamBidRequest.mediaTypes.video.context = 'instream';
+        });
+
+        it('should validate an instream video bid with playerSize', () => {
+          expect(spec.isBidRequestValid(instreamBidRequest)).to.be.true;
+        });
+
+        it('should build imp.video from an instream bid', () => {
+          const request = spec.buildRequests([instreamBidRequest], { ...bidderRequestBase, bids: [instreamBidRequest] });
+          expect(request.data.imp[0].video).to.exist;
+          expect(request.data.imp[0].video.w).to.equal(640);
+          expect(request.data.imp[0].video.h).to.equal(480);
+          expect(request.data.imp[0].banner).to.be.an('undefined');
+        });
+
+        it('should return a video bid with vastXml from a VAST instream response', () => {
+          const request = spec.buildRequests([instreamBidRequest], { ...bidderRequestBase, bids: [instreamBidRequest] });
+          const instreamOrtbResponse = {
+            body: {
+              id: 'instream_response',
+              seatbid: [{
+                bid: [{
+                  id: 'advertIdInstream',
+                  impid: 'bidIdVideo',
+                  price: 15,
+                  mtype: 2,
+                  nurl: 'urlInstream',
+                  adm: '<VAST version="3.0"><Ad></Ad></VAST>',
+                  adomain: ['ogury.com'],
+                  w: 640,
+                  h: 480
+                }]
+              }]
+            }
+          };
+
+          const result = spec.interpretResponse(instreamOrtbResponse, request);
+          expect(result).to.have.lengthOf(1);
+          expect(result[0].mediaType).to.equal('video');
+          expect(result[0].vastXml).to.contain('<VAST');
+        });
+      });
+    }
+  });
+});

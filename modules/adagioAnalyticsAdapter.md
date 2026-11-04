@@ -1,17 +1,21 @@
 # Overview
 
 Module Name: Adagio Analytics Adapter
-Module Type: Adagio Adapter
+Module Type: Analytics Adapter
 Maintainer: dev@adagio.io
 
 # Description
 
 Analytics adapter for Adagio
 
-# Test Parameters
+# Settings
 
-```
-{
-  provider: 'adagio'
-}
+```js
+  pbjs.enableAnalytics({
+    provider: 'adagio',
+    options: {
+      organizationId: '1000', // Required. Provided by Adagio
+      site: 'my-website', // Required. Provided by Adagio
+    }
+  });
 ```

@@ -16,16 +16,17 @@ PubMatic bid adapter supports Video, Banner and Native currently.
 ```
 var adUnits = [
 {
-    code: 'test-div',    
+    code: 'test-div',
     sizes: [
         [300, 250],
         [728, 90]
-    ],     
+    ],
     bids: [{
       bidder: 'pubmatic',
       params: {
-        publisherId: '156209',               // required
-        adSlot: 'pubmatic_test2',            // optional
+        publisherId: '156209',               // required, must be a string, not an integer or other js type.
+        outstreamAU: 'renderer_test_pubmatic',   // required if mediaTypes-> video-> context is 'outstream' and optional if renderer is defined in adUnits or in mediaType video. This value can be get by BlueBillyWig Team.
+        adSlot: 'pubmatic_test2',            // optional, must be a string, not an integer or other js type.
         pmzoneid: 'zone1, zone11',           // optional
         lat: '40.712775',                    // optional
         lon: '-74.005973',                   // optional
@@ -35,7 +36,8 @@ var adUnits = [
         kadfloor: '0.50',                    // optional
         currency: 'AUD',                     // optional (Value configured only in the 1st adunit will be passed on. < br/> Values if present in subsequent adunits, will be ignored.)
         dctr: 'key1=123|key2=345',            // optional (Value configured only in the 1st adunit will be passed on. < br/> Values if present in subsequent adunits, will be ignored.)
-        bcat: ['IAB1-5', 'IAB1-7']                // Optional: Blocked IAB Categories. (Values from all slots will be combined and only unique values will be passed. An array of strings only. Each category should be a string of a length of more than 3 characters.)
+        bcat: ['IAB1-5', 'IAB1-7'],                // Optional: Blocked IAB Categories. (Values from all slots will be combined and only unique values will be passed. An array of strings only. Each category should be a string of a length of more than 3 characters.)
+        deals: ['deal-id-1', 'deal-id-200']   // optional: PMP Deals, should be array of strings
       }
     }]
 }];
@@ -68,6 +70,7 @@ var adVideoAdUnits = [
           protocols: [ 2, 3 ],                  // optional
           battr: [ 13, 14 ],                    // optional
           linearity: 1,                         // optional
+          plcmt: 1,                             // optional
           placement: 2,                         // optional
           minbitrate: 10,                       // optional
           maxbitrate: 10                        // optional
@@ -81,7 +84,7 @@ var adVideoAdUnits = [
 ```
 var adUnits = [
 {
-    code: 'test-div',    
+    code: 'test-div',
     mediaTypes: {
        native: {
             image: {
@@ -167,6 +170,7 @@ var adUnits = [
           protocols: [ 2, 3 ],                  // optional
           battr: [ 13, 14 ],                    // optional
           linearity: 1,                         // optional
+          plcmt: 1,                             // optional
           placement: 2,                         // optional
           minbitrate: 10,                       // optional
           maxbitrate: 10                        // optional
@@ -185,7 +189,12 @@ PubMatic recommends the UserSync configuration below.  Without it, the PubMatic 
 pbjs.setConfig({
    userSync: {
     iframeEnabled: true,
-    enabledBidders: ['pubmatic'],
+    filterSettings: {
+      iframe: {
+        bidders: '*',    // '*' represents all bidders
+        filter: 'include'
+      }
+    },
     syncDelay: 6000
  }});
 
@@ -194,9 +203,14 @@ For Video ads, prebid cache needs to be enabled for PubMatic adapter.
 pbjs.setConfig({
     debug: true,
     cache: {
-        url: 'https://prebid.adnxs.com/pbc/v1/cache'
+        url: 'https://prebid.example.com/pbc/v1/cache'
     }
 });
 
 ```
 Note: Combine the above the configuration with any other UserSync configuration.  Multiple setConfig() calls overwrite each other and only last call for a given attribute will take effect.
+
+# Notes:
+- PubMatic will return a test-bid if "pubmaticTest=true" is present in page URL
+- PubMatic will set bid.adserverTargeting.hb_buyid_pubmatic targeting key while submitting a bid into Prebid
+

@@ -1,76 +1,51 @@
-import { config } from './config';
-import clone from 'just-clone';
-import find from 'core-js/library/fn/array/find';
-import includes from 'core-js/library/fn/array/includes';
-import { parse } from './url';
-const CONSTANTS = require('./constants');
+import { config } from './config.js';
 
-var _loggingChecked = false;
+import { PbPromise } from './utils/promise.js';
+import deepAccess from 'dlv/index.js';
+import { isArray, isFn, isPlainObject, isStr } from './utils/objects.js';
+import * as logging from './utils/logging.js';
+import * as debug from './utils/debug.js';
 
-var tArr = 'Array';
-var tStr = 'String';
-var tFn = 'Function';
-var tNumb = 'Number';
-var tObject = 'Object';
-var tBoolean = 'Boolean';
-var toString = Object.prototype.toString;
-let consoleExists = Boolean(window.console);
-let consoleLogExists = Boolean(consoleExists && window.console.log);
-let consoleInfoExists = Boolean(consoleExists && window.console.info);
-let consoleWarnExists = Boolean(consoleExists && window.console.warn);
-let consoleErrorExists = Boolean(consoleExists && window.console.error);
+export { deepAccess };
+export { dset as deepSetValue } from 'dset';
+export * from './utils/objects.js';
+export { getWinDimensions, resetWinDimensions, getScreenOrientation } from './utils/winDimensions.js';
+export { compressDataWithGZip, isGzipCompressionSupported } from './utils/gzip.js';
+
+// many tests stub out these methods, which does not work if we use `export from` - hence the roundabout rebinding
+export const logInfo = logging.logInfo;
+export const logWarn = logging.logWarn;
+export const logError = logging.logError;
+export const logMessage = logging.logMessage;
+export const prefixLog = logging.prefixLog;
+export const debugTurnedOn = debug.debugTurnedOn;
 
 // this allows stubbing of utility functions that are used internally by other utility functions
 export const internal = {
   checkCookieSupport,
-  createTrackPixelIframeHtml,
   getWindowSelf,
   getWindowTop,
-  getAncestorOrigins,
-  getTopFrameReferrer,
+  canAccessWindowTop,
   getWindowLocation,
-  getTopWindowLocation,
-  insertUserSyncIframe,
   insertElement,
   isFn,
   triggerPixel,
   logError,
   logWarn,
   logMessage,
-  logInfo
+  logInfo,
+  parseQS,
+  formatQS,
+  deepEqual,
+  runBackgroundTask,
 };
 
-var uniqueRef = {};
-export let bind = function(a, b) { return b; }.bind(null, 1, uniqueRef)() === uniqueRef
-  ? Function.prototype.bind
-  : function(bind) {
-    var self = this;
-    var args = Array.prototype.slice.call(arguments, 1);
-    return function() {
-      return self.apply(bind, args.concat(Array.prototype.slice.call(arguments)));
-    };
-  };
-
-/*
- *   Substitutes into a string from a given map using the token
- *   Usage
- *   var str = 'text %%REPLACE%% this text with %%SOMETHING%%';
- *   var map = {};
- *   map['replace'] = 'it was subbed';
- *   map['something'] = 'something else';
- *   console.log(replaceTokenInString(str, map, '%%')); => "text it was subbed this text with something else"
+const prebidInternal = {};
+/**
+ * Returns object that is used as internal prebid namespace
  */
-export function replaceTokenInString(str, map, token) {
-  _each(map, function (value, key) {
-    value = (value === undefined) ? '' : value;
-
-    var keyString = token + key.toUpperCase() + token;
-    var re = new RegExp(keyString, 'g');
-
-    str = str.replace(re, value);
-  });
-
-  return str;
+export function getPrebidInternal() {
+  return prebidInternal;
 }
 
 /* utility method to get incremental integer starting from 1 */
@@ -84,7 +59,7 @@ var getIncrementalInteger = (function () {
 
 // generate a random string (to be used as a dynamic JSONP callback)
 export function getUniqueIdentifierStr() {
-  return getIncrementalInteger() + Math.random().toString(16).substr(2);
+  return getIncrementalInteger() + Math.random().toString(16).substring(2);
 }
 
 /**
@@ -105,36 +80,25 @@ export function generateUUID(placeholder) {
  */
 function _getRandomData() {
   if (window && window.crypto && window.crypto.getRandomValues) {
-    return crypto.getRandomValues(new Uint8Array(1))[0] % 16;
+    return window.crypto.getRandomValues(new Uint8Array(1))[0] % 16;
   } else {
     return Math.random() * 16;
   }
 }
 
 export function getBidIdParameter(key, paramsObj) {
-  if (paramsObj && paramsObj[key]) {
-    return paramsObj[key];
-  }
-
-  return '';
-}
-
-export function tryAppendQueryString(existingUrl, key, value) {
-  if (value) {
-    return existingUrl += key + '=' + encodeURIComponent(value) + '&';
-  }
-
-  return existingUrl;
+  return paramsObj?.[key] || '';
 }
 
 // parse a query string object passed in bid params
 // bid params should be an object such as {key: "value", key1 : "value1"}
+// aliases to formatQS
 export function parseQueryStringParameters(queryObj) {
   let result = '';
   for (var k in queryObj) {
     if (queryObj.hasOwnProperty(k)) { result += k + '=' + encodeURIComponent(queryObj[k]) + '&'; }
   }
-
+  result = result.replace(/&$/, '');
   return result;
 }
 
@@ -142,40 +106,31 @@ export function parseQueryStringParameters(queryObj) {
 export function transformAdServerTargetingObj(targeting) {
   // we expect to receive targeting for a single slot at a time
   if (targeting && Object.getOwnPropertyNames(targeting).length > 0) {
-    return getKeys(targeting)
-      .map(key => `${key}=${encodeURIComponent(getValue(targeting, key))}`).join('&');
+    return Object.keys(targeting)
+      .map(key => `${key}=${encodeURIComponent(targeting[key])}`).join('&');
   } else {
     return '';
   }
 }
 
 /**
- * Read an adUnit object and return the sizes used in an [[728, 90]] format (even if they had [728, 90] defined)
- * Preference is given to the `adUnit.mediaTypes.banner.sizes` object over the `adUnit.sizes`
- * @param {object} adUnit one adUnit object from the normal list of adUnits
- * @returns {Array.<number[]>} array of arrays containing numeric sizes
+ * Parse a GPT-Style general size Array like `[[300, 250]]` or `"300x250,970x90"` into an array of width, height tuples `[[300, 250]]` or '[[300,250], [970,90]]'
  */
-export function getAdUnitSizes(adUnit) {
-  if (!adUnit) {
-    return;
-  }
-
-  let sizes = [];
-  if (adUnit.mediaTypes && adUnit.mediaTypes.banner && Array.isArray(adUnit.mediaTypes.banner.sizes)) {
-    let bannerSizes = adUnit.mediaTypes.banner.sizes;
-    if (Array.isArray(bannerSizes[0])) {
-      sizes = bannerSizes;
-    } else {
-      sizes.push(bannerSizes);
+export function sizesToSizeTuples(sizes) {
+  if (typeof sizes === 'string') {
+    // multiple sizes will be comma-separated
+    return sizes
+      .split(/\s*,\s*/)
+      .map(sz => sz.match(/^(\d+)x(\d+)$/i))
+      .filter(match => match)
+      .map(([_, w, h]) => [parseInt(w, 10), parseInt(h, 10)]);
+  } else if (Array.isArray(sizes)) {
+    if (isValidGPTSingleSize(sizes)) {
+      return [sizes];
     }
-  } else if (Array.isArray(adUnit.sizes)) {
-    if (Array.isArray(adUnit.sizes[0])) {
-      sizes = adUnit.sizes;
-    } else {
-      sizes.push(adUnit.sizes);
-    }
+    return sizes.filter(isValidGPTSingleSize);
   }
-  return sizes;
+  return [];
 }
 
 /**
@@ -184,98 +139,36 @@ export function getAdUnitSizes(adUnit) {
  * @return {Array.<string>}  Array of strings like `["300x250"]` or `["300x250", "728x90"]`
  */
 export function parseSizesInput(sizeObj) {
-  var parsedSizes = [];
-
-  // if a string for now we can assume it is a single size, like "300x250"
-  if (typeof sizeObj === 'string') {
-    // multiple sizes will be comma-separated
-    var sizes = sizeObj.split(',');
-
-    // regular expression to match strigns like 300x250
-    // start of line, at least 1 number, an "x" , then at least 1 number, and the then end of the line
-    var sizeRegex = /^(\d)+x(\d)+$/i;
-    if (sizes) {
-      for (var curSizePos in sizes) {
-        if (hasOwn(sizes, curSizePos) && sizes[curSizePos].match(sizeRegex)) {
-          parsedSizes.push(sizes[curSizePos]);
-        }
-      }
-    }
-  } else if (typeof sizeObj === 'object') {
-    var sizeArrayLength = sizeObj.length;
-
-    // don't process empty array
-    if (sizeArrayLength > 0) {
-      // if we are a 2 item array of 2 numbers, we must be a SingleSize array
-      if (sizeArrayLength === 2 && typeof sizeObj[0] === 'number' && typeof sizeObj[1] === 'number') {
-        parsedSizes.push(parseGPTSingleSizeArray(sizeObj));
-      } else {
-        // otherwise, we must be a MultiSize array
-        for (var i = 0; i < sizeArrayLength; i++) {
-          parsedSizes.push(parseGPTSingleSizeArray(sizeObj[i]));
-        }
-      }
-    }
-  }
-
-  return parsedSizes;
+  return sizesToSizeTuples(sizeObj).map(sizeTupleToSizeString);
 }
 
-// parse a GPT style sigle size array, (i.e [300,250])
+export function sizeTupleToSizeString(size) {
+  return size[0] + 'x' + size[1];
+}
+
+// Parse a GPT style single size array, (i.e [300, 250])
 // into an AppNexus style string, (i.e. 300x250)
 export function parseGPTSingleSizeArray(singleSize) {
+  if (isValidGPTSingleSize(singleSize)) {
+    return sizeTupleToSizeString(singleSize);
+  }
+}
+
+export function sizeTupleToRtbSize(size) {
+  return { w: size[0], h: size[1] };
+}
+
+// Parse a GPT style single size array, (i.e [300, 250])
+// into OpenRTB-compatible (imp.banner.w/h, imp.banner.format.w/h, imp.video.w/h) object(i.e. {w:300, h:250})
+export function parseGPTSingleSizeArrayToRtbSize(singleSize) {
+  if (isValidGPTSingleSize(singleSize)) {
+    return sizeTupleToRtbSize(singleSize);
+  }
+}
+
+function isValidGPTSingleSize(singleSize) {
   // if we aren't exactly 2 items in this array, it is invalid
-  if (isArray(singleSize) && singleSize.length === 2 && (!isNaN(singleSize[0]) && !isNaN(singleSize[1]))) {
-    return singleSize[0] + 'x' + singleSize[1];
-  }
-}
-
-/**
- * @deprecated This function will be removed soon. Use http://prebid.org/dev-docs/bidder-adaptor.html#referrers
- */
-export function getTopWindowLocation() {
-  if (inIframe()) {
-    let loc;
-    try {
-      loc = internal.getAncestorOrigins() || internal.getTopFrameReferrer();
-    } catch (e) {
-      logInfo('could not obtain top window location', e);
-    }
-    if (loc) return parse(loc, {'decodeSearchAsString': true});
-  }
-  return internal.getWindowLocation();
-}
-
-/**
- * @deprecated This function will be removed soon. Use http://prebid.org/dev-docs/bidder-adaptor.html#referrers
- */
-export function getTopFrameReferrer() {
-  try {
-    // force an exception in x-domain environments. #1509
-    window.top.location.toString();
-    let referrerLoc = '';
-    let currentWindow;
-    do {
-      currentWindow = currentWindow ? currentWindow.parent : window;
-      if (currentWindow.document && currentWindow.document.referrer) {
-        referrerLoc = currentWindow.document.referrer;
-      }
-    }
-    while (currentWindow !== window.top);
-    return referrerLoc;
-  } catch (e) {
-    return window.document.referrer;
-  }
-}
-
-/**
- * @deprecated This function will be removed soon. Use http://prebid.org/dev-docs/bidder-adaptor.html#referrers
- */
-export function getAncestorOrigins() {
-  if (window.document.location && window.document.location.ancestorOrigins &&
-    window.document.location.ancestorOrigins.length >= 1) {
-    return window.document.location.ancestorOrigins[window.document.location.ancestorOrigins.length - 1];
-  }
+  return isArray(singleSize) && singleSize.length === 2 && (!isNaN(singleSize[0]) && !isNaN(singleSize[1]));
 }
 
 export function getWindowTop() {
@@ -290,95 +183,65 @@ export function getWindowLocation() {
   return window.location;
 }
 
-/**
- * @deprecated This function will be removed soon. Use http://prebid.org/dev-docs/bidder-adaptor.html#referrers
- */
-export function getTopWindowUrl() {
-  let href;
+export function getDocument() {
+  return document;
+}
+
+export function canAccessWindowTop() {
   try {
-    href = internal.getTopWindowLocation().href;
+    if (internal.getWindowTop().location.href) {
+      return true;
+    }
   } catch (e) {
-    href = '';
-  }
-  return href;
-}
-
-/**
- * @deprecated This function will be removed soon. Use http://prebid.org/dev-docs/bidder-adaptor.html#referrers
- */
-export function getTopWindowReferrer() {
-  try {
-    return window.top.document.referrer;
-  } catch (e) {
-    return document.referrer;
+    return false;
   }
 }
 
 /**
- * Wrappers to console.(log | info | warn | error). Takes N arguments, the same as the native methods
+ * Returns the window to use for fingerprinting reads: win if provided, otherwise top or self.
+ * @param {Window} [win]
+ * @returns {Window}
  */
-export function logMessage() {
-  if (debugTurnedOn() && consoleLogExists) {
-    console.log.apply(console, decorateLog(arguments, 'MESSAGE:'));
+export function getFallbackWindow(win) {
+  if (win) {
+    return win;
   }
+  return canAccessWindowTop() ? internal.getWindowTop() : internal.getWindowSelf();
 }
 
-export function logInfo() {
-  if (debugTurnedOn() && consoleInfoExists) {
-    console.info.apply(console, decorateLog(arguments, 'INFO:'));
-  }
-}
+export const createIframe = (() => {
+  const DEFAULTS = {
+    border: '0px',
+    hspace: '0',
+    vspace: '0',
+    marginWidth: '0',
+    marginHeight: '0',
+    scrolling: 'no',
+    frameBorder: '0',
+    allowtransparency: 'true'
+  };
+  return (doc, attrs, style = {}) => {
+    const f = doc.createElement('iframe');
+    Object.assign(f, Object.assign({}, DEFAULTS, attrs));
+    Object.assign(f.style, style);
+    return f;
+  };
+})();
 
-export function logWarn() {
-  if (debugTurnedOn() && consoleWarnExists) {
-    console.warn.apply(console, decorateLog(arguments, 'WARNING:'));
-  }
-}
-
-export function logError() {
-  if (debugTurnedOn() && consoleErrorExists) {
-    console.error.apply(console, decorateLog(arguments, 'ERROR:'));
-  }
-}
-
-function decorateLog(args, prefix) {
-  args = [].slice.call(args);
-  prefix && args.unshift(prefix);
-  args.unshift('display: inline-block; color: #fff; background: #3b88c3; padding: 1px 4px; border-radius: 3px;');
-  args.unshift('%cPrebid');
-  return args;
-}
-
-export function hasConsoleLogger() {
-  return consoleLogExists;
-}
-
-export function debugTurnedOn() {
-  if (config.getConfig('debug') === false && _loggingChecked === false) {
-    const debug = getParameterByName(CONSTANTS.DEBUG_MODE).toUpperCase() === 'TRUE';
-    config.setConfig({ debug });
-    _loggingChecked = true;
-  }
-
-  return !!config.getConfig('debug');
-}
-
-export function createInvisibleIframe() {
-  var f = document.createElement('iframe');
-  f.id = getUniqueIdentifierStr();
-  f.height = 0;
-  f.width = 0;
-  f.border = '0px';
-  f.hspace = '0';
-  f.vspace = '0';
-  f.marginWidth = '0';
-  f.marginHeight = '0';
-  f.style.border = '0';
-  f.scrolling = 'no';
-  f.frameBorder = '0';
-  f.src = 'about:blank';
-  f.style.display = 'none';
-  return f;
+export function createInvisibleIframe(doc = document, attrs = {}, style = {}) {
+  return createIframe(doc, {
+    id: getUniqueIdentifierStr(),
+    width: 0,
+    height: 0,
+    src: 'about:blank',
+    ...attrs
+  }, {
+    display: 'none',
+    height: '0px',
+    width: '0px',
+    border: '0px',
+    ...style
+  });
 }
 
 /*
@@ -386,86 +249,7 @@ export function createInvisibleIframe() {
  *   and if it does return the value
  */
 export function getParameterByName(name) {
-  var regexS = '[\\?&]' + name + '=([^&#]*)';
-  var regex = new RegExp(regexS);
-  var results = regex.exec(window.location.search);
-  if (results === null) {
-    return '';
-  }
-
-  return decodeURIComponent(results[1].replace(/\+/g, ' '));
-}
-
-/**
- * This function validates paramaters.
- * @param  {Object} paramObj          [description]
- * @param  {string[]} requiredParamsArr [description]
- * @return {boolean}                   Bool if paramaters are valid
- */
-export function hasValidBidRequest(paramObj, requiredParamsArr, adapter) {
-  var found = false;
-
-  function findParam(value, key) {
-    if (key === requiredParamsArr[i]) {
-      found = true;
-    }
-  }
-
-  for (var i = 0; i < requiredParamsArr.length; i++) {
-    found = false;
-
-    _each(paramObj, findParam);
-
-    if (!found) {
-      logError('Params are missing for bid request. One of these required paramaters are missing: ' + requiredParamsArr, adapter);
-      return false;
-    }
-  }
-
-  return true;
-}
-
-// Handle addEventListener gracefully in older browsers
-export function addEventHandler(element, event, func) {
-  if (element.addEventListener) {
-    element.addEventListener(event, func, true);
-  } else if (element.attachEvent) {
-    element.attachEvent('on' + event, func);
-  }
-}
-/**
- * Return if the object is of the
- * given type.
- * @param {*} object to test
- * @param {String} _t type string (e.g., Array)
- * @return {Boolean} if object is of type _t
- */
-export function isA(object, _t) {
-  return toString.call(object) === '[object ' + _t + ']';
-}
-
-export function isFn(object) {
-  return isA(object, tFn);
-}
-
-export function isStr(object) {
-  return isA(object, tStr);
-}
-
-export function isArray(object) {
-  return isA(object, tArr);
-}
-
-export function isNumber(object) {
-  return isA(object, tNumb);
-}
-
-export function isPlainObject(object) {
-  return isA(object, tObject);
-}
-
-export function isBoolean(object) {
-  return isA(object, tBoolean);
+  return parseQS(getWindowLocation().search)[name] || '';
 }
 
 /**
@@ -479,12 +263,7 @@ export function isEmpty(object) {
   if (isArray(object) || isStr(object)) {
     return !(object.length > 0);
   }
-
-  for (var k in object) {
-    if (hasOwnProperty.call(object, k)) return false;
-  }
-
-  return true;
+  return Object.keys(object).length <= 0;
 }
 
 /**
@@ -500,77 +279,29 @@ export function isEmptyStr(str) {
  * Iterate object with the function
  * falls back to es5 `forEach`
  * @param {Array|Object} object
- * @param {Function(value, key, object)} fn
+ * @param {Function} fn - The function to execute for each element. It receives three arguments: value, key, and the original object.
+ * @returns {void}
  */
 export function _each(object, fn) {
-  if (isEmpty(object)) return;
-  if (isFn(object.forEach)) return object.forEach(fn, this);
-
-  var k = 0;
-  var l = object.length;
-
-  if (l > 0) {
-    for (; k < l; k++) fn(object[k], k, object);
-  } else {
-    for (k in object) {
-      if (hasOwnProperty.call(object, k)) fn.call(this, object[k], k);
-    }
-  }
+  if (isFn(object?.forEach)) return object.forEach(fn, this);
+  Object.entries(object || {}).forEach(([k, v]) => fn.call(this, v, k));
 }
 
 export function contains(a, obj) {
-  if (isEmpty(a)) {
-    return false;
-  }
-
-  if (isFn(a.indexOf)) {
-    return a.indexOf(obj) !== -1;
-  }
-
-  var i = a.length;
-  while (i--) {
-    if (a[i] === obj) {
-      return true;
-    }
-  }
-
-  return false;
+  return isFn(a?.includes) && a.includes(obj);
 }
-
-export let indexOf = (function () {
-  if (Array.prototype.indexOf) {
-    return Array.prototype.indexOf;
-  }
-
-  // ie8 no longer supported
-  // return polyfills.indexOf;
-}());
 
 /**
  * Map an array or object into another array
  * given a function
  * @param {Array|Object} object
- * @param {Function(value, key, object)} callback
+ * @param {Function} callback - The function to execute for each element. It receives three arguments: value, key, and the original object.
  * @return {Array}
  */
 export function _map(object, callback) {
-  if (isEmpty(object)) return [];
-  if (isFn(object.map)) return object.map(callback);
-  var output = [];
-  _each(object, function (value, key) {
-    output.push(callback(value, key, object));
-  });
-
-  return output;
+  if (isFn(object?.map)) return object.map(callback);
+  return Object.entries(object || {}).map(([k, v]) => callback(v, k, object));
 }
-
-var hasOwn = function (objectToCheck, propertyToCheckFor) {
-  if (objectToCheck.hasOwnProperty) {
-    return objectToCheck.hasOwnProperty(propertyToCheckFor);
-  } else {
-    return (typeof objectToCheck[propertyToCheckFor] !== 'undefined') && (objectToCheck.constructor.prototype[propertyToCheckFor] !== objectToCheck[propertyToCheckFor]);
-  }
-};
 
 /*
 * Inserts an element(elm) as targets child, by default as first child
@@ -578,7 +309,7 @@ var hasOwn = function (objectToCheck, propertyToCheckFor) {
 * @param {HTMLElement} [doc]
 * @param {HTMLElement} [target]
 * @param {Boolean} [asLastChildChild]
-* @return {HTMLElement}
+* @return {HTML Element}
 */
 export function insertElement(elm, doc, target, asLastChildChild) {
   doc = doc || document;
@@ -592,30 +323,90 @@ export function insertElement(elm, doc, target, asLastChildChild) {
     parentEl = parentEl.length ? parentEl : doc.getElementsByTagName('body');
     if (parentEl.length) {
       parentEl = parentEl[0];
-      let insertBeforeEl = asLastChildChild ? null : parentEl.firstChild;
+      const insertBeforeEl = asLastChildChild ? null : parentEl.firstChild;
       return parentEl.insertBefore(elm, insertBeforeEl);
     }
   } catch (e) {}
 }
 
 /**
- * Inserts an image pixel with the specified `url` for cookie sync
- * @param {string} url URL string of the image pixel to load
- * @param  {function} [done] an optional exit callback, used when this usersync pixel is added during an async process
+ * Returns a promise that completes when the given element triggers a 'load' or 'error' DOM event, or when
+ * `timeout` milliseconds have elapsed.
+ *
+ * @param {HTMLElement} element
+ * @param {Number} [timeout]
+ * @returns {Promise}
  */
-export function triggerPixel(url, done) {
+export function waitForElementToLoad(element, timeout) {
+  let timer = null;
+  return new PbPromise((resolve) => {
+    const onLoad = function() {
+      element.removeEventListener('load', onLoad);
+      element.removeEventListener('error', onLoad);
+      if (timer != null) {
+        window.clearTimeout(timer);
+      }
+      resolve();
+    };
+    element.addEventListener('load', onLoad);
+    element.addEventListener('error', onLoad);
+    if (timeout != null) {
+      timer = window.setTimeout(onLoad, timeout);
+    }
+  });
+}
+
+/**
+ * Fires a fire-and-forget request for `url` on the background task queue (a keepalive fetch, falling
+ * back to an image pixel) for cookie sync and similar best-effort pixels.
+ * @param {string} url URL string to request
+ * @param {string} [credentials='include'] fetch credentials mode (e.g. `'include'`, `'omit'`); pass
+ *   `'omit'` for a cookieless request — the image fallback (which cannot omit cookies) is then skipped.
+ */
+
+export function politeTriggerPixel(url, credentials = 'include') {
+  const triggerSync = () => {
+    if (window.fetch && window.Request) {
+      try {
+        const request = new Request(url, {
+          method: 'GET',
+          mode: 'no-cors',
+          credentials,
+          keepalive: true
+        });
+        window.fetch(request).catch(() => { if (credentials !== 'omit') triggerPixel(url); });
+        return;
+      } catch (e) {}
+    }
+    if (credentials !== 'omit') triggerPixel(url);
+  };
+
+  runBackgroundTask(triggerSync);
+}
+
+export function triggerPixel(url, done, timeout) {
   const img = new Image();
   if (done && internal.isFn(done)) {
-    img.addEventListener('load', done);
-    img.addEventListener('error', done);
+    waitForElementToLoad(img, timeout).then(done);
   }
   img.src = url;
 }
 
-export function callBurl({ source, burl }) {
-  if (source === CONSTANTS.S2S.SRC && burl) {
-    internal.triggerPixel(burl);
+/**
+ * Run a task at low priority when supported by the browser, or immediately as fallback.
+ * @param {function} task
+ */
+export function runBackgroundTask(task) {
+  const scheduler = window.scheduler;
+  if (scheduler?.postTask) {
+    scheduler.postTask(task, { priority: 'background' }).catch(() => task());
+    return;
   }
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(() => task(), { timeout: 2000 });
+    return;
+  }
+  task();
 }
 
 /**
@@ -627,129 +418,67 @@ export function insertHtmlIntoIframe(htmlCode) {
   if (!htmlCode) {
     return;
   }
-
-  let iframe = document.createElement('iframe');
-  iframe.id = getUniqueIdentifierStr();
-  iframe.width = 0;
-  iframe.height = 0;
-  iframe.hspace = '0';
-  iframe.vspace = '0';
-  iframe.marginWidth = '0';
-  iframe.marginHeight = '0';
-  iframe.style.display = 'none';
-  iframe.style.height = '0px';
-  iframe.style.width = '0px';
-  iframe.scrolling = 'no';
-  iframe.frameBorder = '0';
-  iframe.allowtransparency = 'true';
-
+  const iframe = createInvisibleIframe();
   internal.insertElement(iframe, document, 'body');
 
-  iframe.contentWindow.document.open();
-  iframe.contentWindow.document.write(htmlCode);
-  iframe.contentWindow.document.close();
+  ((doc) => {
+    doc.open();
+    doc.write(htmlCode);
+    doc.close();
+  })(iframe.contentWindow.document);
 }
-
-/**
- * Inserts empty iframe with the specified `url` for cookie sync
- * @param  {string} url URL to be requested
- * @param  {string} encodeUri boolean if URL should be encoded before inserted. Defaults to true
- * @param  {function} [done] an optional exit callback, used when this usersync pixel is added during an async process
- */
-export function insertUserSyncIframe(url, done) {
-  let iframeHtml = internal.createTrackPixelIframeHtml(url, false, 'allow-scripts allow-same-origin');
-  let div = document.createElement('div');
-  div.innerHTML = iframeHtml;
-  let iframe = div.firstChild;
-  if (done && internal.isFn(done)) {
-    iframe.addEventListener('load', done);
-    iframe.addEventListener('error', done);
-  }
-  internal.insertElement(iframe, document, 'html', true);
-};
 
 /**
  * Creates a snippet of HTML that retrieves the specified `url`
  * @param  {string} url URL to be requested
+ * @param encode
  * @return {string}     HTML snippet that contains the img src = set to `url`
  */
-export function createTrackPixelHtml(url) {
+export function createTrackPixelHtml(url, encode = encodeURI) {
   if (!url) {
     return '';
   }
 
-  let escapedUrl = encodeURI(url);
+  const escapedUrl = encode(url);
   let img = '<div style="position:absolute;left:0px;top:0px;visibility:hidden;">';
   img += '<img src="' + escapedUrl + '"></div>';
   return img;
 };
 
-/**
- * Creates a snippet of Iframe HTML that retrieves the specified `url`
- * @param  {string} url plain URL to be requested
- * @param  {string} encodeUri boolean if URL should be encoded before inserted. Defaults to true
- * @param  {string} sandbox string if provided the sandbox attribute will be included with the given value
- * @return {string}     HTML snippet that contains the iframe src = set to `url`
- */
-export function createTrackPixelIframeHtml(url, encodeUri = true, sandbox = '') {
-  if (!url) {
-    return '';
-  }
-  if (encodeUri) {
-    url = encodeURI(url);
-  }
-  if (sandbox) {
-    sandbox = `sandbox="${sandbox}"`;
-  }
+// The encodeMacroURI implementation below was written by a bot (Claude Code).
 
-  return `<iframe ${sandbox} id="${getUniqueIdentifierStr()}"
-      frameborder="0"
-      allowtransparency="true"
-      marginheight="0" marginwidth="0"
-      width="0" hspace="0" vspace="0" height="0"
-      style="height:0px;width:0px;display:none;"
-      scrolling="no"
-      src="${url}">
-    </iframe>`;
-}
+// A macro name bypasses encodeURI, since its braces are emitted literally, so it is escaped against
+// this set instead. Of these, only the double quote can close the attribute value that
+// createTrackPixelHtml writes; the rest are escaped because an encoded URL is not guaranteed to end
+// up in a double-quoted attribute - in an unquoted one, whitespace and the backtick end the value
+// and `<` and `>` delimit the tag - and because none of them belong in a URI in the first place.
+// The whitespace is spelled out rather than written `\s`, which also matches non-ASCII whitespace:
+// that is left alone, so a macro name is passed through byte-for-byte where escaping is not needed.
+const HTML_UNSAFE_CHARS = /["<>`\t\n\v\f\r ]/g;
+
+// Characters encodeURI and encodeURIComponent encode differently. A macro name containing any of
+// them is not recognised as a macro, so its braces stay percent-encoded like the rest of the URL.
+// Matched with matchAll, which works on a copy; exec would advance lastIndex on this shared object
+// and carry the offset over into the next call.
+const MACRO = /\$\{([^}#$&+,/:;=?@]+)\}/g;
 
 /**
- * Returns iframe document in a browser agnostic way
- * @param  {Object} iframe reference
- * @return {Object}        iframe `document` reference
+ * encodeURI, but preserves macros of the form '${MACRO}' (e.g. '${AUCTION_PRICE}')
+ *
+ * A macro's braces are emitted literally so that downstream substitution can find them. The macro
+ * name is otherwise passed through unchanged, except for the characters in HTML_UNSAFE_CHARS.
+ * @param url
+ * @return {string}
  */
-export function getIframeDocument(iframe) {
-  if (!iframe) {
-    return;
+export function encodeMacroURI(url) {
+  let encoded = '';
+  let from = 0;
+  for (const match of url.matchAll(MACRO)) {
+    encoded += encodeURI(url.slice(from, match.index)) +
+      '${' + match[1].replace(HTML_UNSAFE_CHARS, encodeURIComponent) + '}';
+    from = match.index + match[0].length;
   }
-
-  let doc;
-  try {
-    if (iframe.contentWindow) {
-      doc = iframe.contentWindow.document;
-    } else if (iframe.contentDocument.document) {
-      doc = iframe.contentDocument.document;
-    } else {
-      doc = iframe.contentDocument;
-    }
-  } catch (e) {
-    internal.logError('Cannot get iframe document', e);
-  }
-
-  return doc;
-}
-
-export function getValueString(param, val, defaultValue) {
-  if (val === undefined || val === null) {
-    return defaultValue;
-  }
-  if (isStr(val)) {
-    return val;
-  }
-  if (isNumber(val)) {
-    return val.toString();
-  }
-  internal.logWarn('Unsuported type for param: ' + param + ' required type: String');
+  return encoded + encodeURI(url.slice(from));
 }
 
 export function uniques(value, index, arry) {
@@ -764,42 +493,18 @@ export function getBidRequest(id, bidderRequests) {
   if (!id) {
     return;
   }
-  let bidRequest;
-  bidderRequests.some(bidderRequest => {
-    let result = find(bidderRequest.bids, bid => ['bidId', 'adId', 'bid_id'].some(type => bid[type] === id));
-    if (result) {
-      bidRequest = result;
-    }
-    return result;
-  });
-  return bidRequest;
-}
-
-export function getKeys(obj) {
-  return Object.keys(obj);
+  return bidderRequests.flatMap(br => br.bids)
+    .find(bid => ['bidId', 'adId', 'bid_id'].some(prop => bid[prop] === id));
 }
 
 export function getValue(obj, key) {
   return obj[key];
 }
 
-/**
- * Get the key of an object for a given value
- */
-export function getKeyByValue(obj, value) {
-  for (let prop in obj) {
-    if (obj.hasOwnProperty(prop)) {
-      if (obj[prop] === value) {
-        return prop;
-      }
-    }
-  }
-}
-
-export function getBidderCodes(adUnits = $$PREBID_GLOBAL$$.adUnits) {
+export function getBidderCodes(adUnits) {
   // this could memoize adUnits
   return adUnits.map(unit => unit.bids.map(bid => bid.bidder)
-    .reduce(flatten, [])).reduce(flatten).filter(uniques);
+    .reduce(flatten, [])).reduce(flatten, []).filter((bidder) => typeof bidder !== 'undefined').filter(uniques);
 }
 
 export function isGptPubadsDefined() {
@@ -808,25 +513,15 @@ export function isGptPubadsDefined() {
   }
 }
 
-// This function will get highest cpm value bid, in case of tie it will return the bid with lowest timeToRespond
-export const getHighestCpm = getHighestCpmCallback('timeToRespond', (previous, current) => previous > current);
-
-// This function will get the oldest hightest cpm value bid, in case of tie it will return the bid which came in first
-// Use case for tie: https://github.com/prebid/Prebid.js/issues/2448
-export const getOldestHighestCpmBid = getHighestCpmCallback('responseTimestamp', (previous, current) => previous > current);
-
-// This function will get the latest hightest cpm value bid, in case of tie it will return the bid which came in last
-// Use case for tie: https://github.com/prebid/Prebid.js/issues/2539
-export const getLatestHighestCpmBid = getHighestCpmCallback('responseTimestamp', (previous, current) => previous < current);
-
-function getHighestCpmCallback(useTieBreakerProperty, tieBreakerCallback) {
-  return (previous, current) => {
-    if (previous.cpm === current.cpm) {
-      return tieBreakerCallback(previous[useTieBreakerProperty], current[useTieBreakerProperty]) ? current : previous;
-    }
-    return previous.cpm < current.cpm ? current : previous;
+export function isApnGetTagDefined() {
+  if (window.apntag && isFn(window.apntag.getTag)) {
+    return true;
   }
 }
+
+export const sortByHighestCpm = (a, b) => {
+  return b.cpm - a.cpm;
+};
 
 /**
  * Fisher–Yates shuffle
@@ -840,36 +535,18 @@ export function shuffle(array) {
   // while there are elements in the array
   while (counter > 0) {
     // pick a random index
-    let index = Math.floor(Math.random() * counter);
+    const index = Math.floor(Math.random() * counter);
 
     // decrease counter by 1
     counter--;
 
     // and swap the last element with it
-    let temp = array[counter];
+    const temp = array[counter];
     array[counter] = array[index];
     array[index] = temp;
   }
 
   return array;
-}
-
-export function adUnitsFilter(filter, bid) {
-  return includes(filter, bid && bid.adUnitCode);
-}
-
-/**
- * Check if parent iframe of passed document supports content rendering via 'srcdoc' property
- * @param {HTMLDocument} doc document to check support of 'srcdoc'
- */
-export function isSrcdocSupported(doc) {
-  // Firefox is excluded due to https://bugzilla.mozilla.org/show_bug.cgi?id=1265961
-  return doc.defaultView && doc.defaultView.frameElement &&
-    'srcdoc' in doc.defaultView.frameElement && !/firefox/i.test(navigator.userAgent);
-}
-
-export function deepClone(obj) {
-  return clone(obj);
 }
 
 export function inIframe() {
@@ -880,50 +557,115 @@ export function inIframe() {
   }
 }
 
+/**
+ * https://iabtechlab.com/wp-content/uploads/2016/03/SafeFrames_v1.1_final.pdf
+ */
+export function isSafeFrameWindow() {
+  if (!inIframe()) {
+    return false;
+  }
+
+  const ws = internal.getWindowSelf();
+  return !!(ws.$sf && ws.$sf.ext);
+}
+
+/**
+ * Returns the result of calling the function $sf.ext.geom() if it exists
+ * @see https://iabtechlab.com/wp-content/uploads/2016/03/SafeFrames_v1.1_final.pdf — 5.4 Function $sf.ext.geom
+ * @returns {Object | undefined} geometric information about the container
+ */
+export function getSafeframeGeometry() {
+  try {
+    const ws = getWindowSelf();
+    return (typeof ws.$sf.ext.geom === 'function') ? ws.$sf.ext.geom() : undefined;
+  } catch (e) {
+    logError('Error getting SafeFrame geometry', e);
+    return undefined;
+  }
+}
+
 export function isSafariBrowser() {
-  return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  return /^((?!chrome|chromium|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+}
+
+export function isFirefoxBrowser() {
+  return /firefox|fxios/i.test(navigator.userAgent);
+}
+
+export function isChromeIOSBrowser() {
+  return /crios|crmo/i.test(navigator.userAgent);
+}
+
+export function replaceMacros(str, subs) {
+  if (!str) return;
+  return Object.entries(subs).reduce((str, [key, val]) => {
+    return str.replace(new RegExp('\\$\\{' + key + '\\}', 'g'), val || '');
+  }, str);
 }
 
 export function replaceAuctionPrice(str, cpm) {
-  if (!str) return;
-  return str.replace(/\$\{AUCTION_PRICE\}/g, cpm);
+  return replaceMacros(str, { AUCTION_PRICE: cpm });
+}
+
+export function replaceClickThrough(str, clicktag) {
+  if (!str || !clicktag || typeof clicktag !== 'string') return;
+  return str.replace(/\${CLICKTHROUGH}/g, clicktag);
 }
 
 export function timestamp() {
   return new Date().getTime();
 }
 
-export function checkCookieSupport() {
-  if (window.navigator.cookieEnabled || !!document.cookie.length) {
-    return true;
-  }
-}
-export function cookiesAreEnabled() {
-  if (internal.checkCookieSupport()) {
-    return true;
-  }
-  window.document.cookie = 'prebid.cookieTest';
-  return window.document.cookie.indexOf('prebid.cookieTest') != -1;
-}
-
-export function getCookie(name) {
-  let m = window.document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]*)\\s*(;|$)');
-  return m ? decodeURIComponent(m[2]) : null;
-}
-
-export function setCookie(key, value, expires) {
-  document.cookie = `${key}=${encodeURIComponent(value)}${(expires !== '') ? `; expires=${expires}` : ''}; path=/`;
+/**
+ * The returned value represents the time elapsed since the time origin. @see https://developer.mozilla.org/en-US/docs/Web/API/Performance/now
+ * @returns {number}
+ */
+export function getPerformanceNow() {
+  return (window.performance && window.performance.now && window.performance.now()) || 0;
 }
 
 /**
+ * Returns the difference between `timing.domLoading` and `timing.navigationStart`.
+ * This function uses the deprecated `Performance.timing` API and should be removed in future.
+ * It has not been updated yet because it is still used in some modules.
+ * @deprecated
+ * @param {Window} w The window object used to perform the api call. default to window.self
+ * @returns {number}
+ */
+export function getDomLoadingDuration(w) {
+  let domLoadingDuration = -1;
+
+  w = w || getWindowSelf();
+
+  const performance = w.performance;
+
+  if (w.performance?.timing) {
+    if (w.performance.timing.navigationStart > 0) {
+      const val = performance.timing.domLoading - performance.timing.navigationStart;
+      if (val > 0) {
+        domLoadingDuration = val;
+      }
+    }
+  }
+
+  return domLoadingDuration;
+}
+
+/**
+ * When the deviceAccess flag config option is false, no cookies should be read or set
  * @returns {boolean}
  */
-export function localStorageIsEnabled () {
-  try {
-    localStorage.setItem('prebid.cookieTest', '1');
-    return localStorage.getItem('prebid.cookieTest') === '1';
-  } catch (error) {
-    return false;
+export function hasDeviceAccess() {
+  return config.getConfig('deviceAccess') !== false;
+}
+
+/**
+ * @returns {(boolean|undefined)}
+ */
+export function checkCookieSupport() {
+  // eslint-disable-next-line no-restricted-properties
+  if (window.navigator.cookieEnabled || !!document.cookie.length) {
+    return true;
   }
 }
 
@@ -936,7 +678,7 @@ export function localStorageIsEnabled () {
  *
  * @param {function} func The function which should be executed, once the returned function has been executed
  *   numRequiredCalls times.
- * @param {int} numRequiredCalls The number of times which the returned function needs to be called before
+ * @param {number} numRequiredCalls The number of times which the returned function needs to be called before
  *   func is.
  */
 export function delayExecution(func, numRequiredCalls) {
@@ -947,15 +689,14 @@ export function delayExecution(func, numRequiredCalls) {
   return function () {
     numCalls++;
     if (numCalls === numRequiredCalls) {
-      func.apply(null, arguments);
+      func.apply(this, arguments);
     }
-  }
+  };
 }
 
 /**
  * https://stackoverflow.com/a/34890276/428704
- * @export
- * @param {array} xs
+ * @param {Array} xs
  * @param {string} key
  * @returns {Object} {${key_value}: ${groupByArray}, key_value: {groupByArray}}
  */
@@ -967,103 +708,27 @@ export function groupBy(xs, key) {
 }
 
 /**
- * deepAccess utility function useful for doing safe access (will not throw exceptions) of deep object paths.
- * @param {Object} obj The object containing the values you would like to access.
- * @param {string|number} path Object path to the value you would like to access.  Non-strings are coerced to strings.
- * @returns {*} The value found at the specified object path, or undefined if path is not found.
- */
-export function deepAccess(obj, path) {
-  if (!obj) {
-    return;
-  }
-  path = String(path).split('.');
-  for (let i = 0; i < path.length; i++) {
-    obj = obj[path[i]];
-    if (typeof obj === 'undefined') {
-      return;
-    }
-  }
-  return obj;
-}
-
-/**
- * @param {Object} obj The object to set a deep property value in
- * @param {(string|Array.<string>)} path Object path to the value you would like ot set.
- * @param {*} value The value you would like to set
- */
-export function deepSetValue(obj, path, value) {
-  let i;
-  path = path.split('.');
-  for (i = 0; i < path.length - 1; i++) {
-    if (i !== path.length - 1 && typeof obj[path[i]] === 'undefined') {
-      obj[path[i]] = {};
-    }
-    obj = obj[path[i]];
-  }
-  obj[path[i]] = value;
-}
-
-/**
- * Returns content for a friendly iframe to execute a URL in script tag
- * @param {string} url URL to be executed in a script tag in a friendly iframe
- * <!--PRE_SCRIPT_TAG_MACRO--> and <!--POST_SCRIPT_TAG_MACRO--> are macros left to be replaced if required
- */
-export function createContentToExecuteExtScriptInFriendlyFrame(url) {
-  if (!url) {
-    return '';
-  }
-
-  return `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd"><html><head><base target="_top" /><script>inDapIF=true;</script></head><body><!--PRE_SCRIPT_TAG_MACRO--><script src="${url}"></script><!--POST_SCRIPT_TAG_MACRO--></body></html>`;
-}
-
-/**
- * Build an object consisting of only defined parameters to avoid creating an
- * object with defined keys and undefined values.
- * @param {Object} object The object to pick defined params out of
- * @param {string[]} params An array of strings representing properties to look for in the object
- * @returns {Object} An object containing all the specified values that are defined
- */
-export function getDefinedParams(object, params) {
-  return params
-    .filter(param => object[param])
-    .reduce((bid, param) => Object.assign(bid, { [param]: object[param] }), {});
-}
-
-/**
- * @typedef {Object} MediaTypes
- * @property {Object} banner banner configuration
- * @property {Object} native native configuration
- * @property {Object} video video configuration
- */
-
-/**
  * Validates an adunit's `mediaTypes` parameter
- * @param {MediaTypes} mediaTypes mediaTypes parameter to validate
- * @return {boolean} If object is valid
+ * @param mediaTypes mediaTypes parameter to validate
+ * @return If object is valid
  */
 export function isValidMediaTypes(mediaTypes) {
-  const SUPPORTED_MEDIA_TYPES = ['banner', 'native', 'video'];
-  const SUPPORTED_STREAM_TYPES = ['instream', 'outstream', 'adpod'];
+  const SUPPORTED_MEDIA_TYPES = ['banner', 'native', 'video', 'audio'];
+  const SUPPORTED_STREAM_TYPES = ['instream', 'outstream'];
 
   const types = Object.keys(mediaTypes);
 
-  if (!types.every(type => includes(SUPPORTED_MEDIA_TYPES, type))) {
+  if (!types.every(type => SUPPORTED_MEDIA_TYPES.includes(type))) {
     return false;
   }
 
-  if (mediaTypes.video && mediaTypes.video.context) {
-    return includes(SUPPORTED_STREAM_TYPES, mediaTypes.video.context);
+  if (FEATURES.VIDEO && mediaTypes.video && mediaTypes.video.context) {
+    return SUPPORTED_STREAM_TYPES.includes(mediaTypes.video.context);
   }
 
   return true;
 }
 
-export function getBidderRequest(bidRequests, bidder, adUnitCode) {
-  return find(bidRequests, request => {
-    return request.bids
-      .filter(bid => bid.bidder === bidder && bid.adUnitCode === adUnitCode).length > 0;
-  }) || { start: null, auctionId: null };
-}
 /**
  * Returns user configured bidder params from adunit
  * @param {Object} adUnits
@@ -1074,48 +739,22 @@ export function getBidderRequest(bidRequests, bidder, adUnitCode) {
 export function getUserConfiguredParams(adUnits, adUnitCode, bidder) {
   return adUnits
     .filter(adUnit => adUnit.code === adUnitCode)
-    .map((adUnit) => adUnit.bids)
-    .reduce(flatten, [])
+    .flatMap((adUnit) => adUnit.bids)
     .filter((bidderData) => bidderData.bidder === bidder)
     .map((bidderData) => bidderData.params || {});
 }
-/**
- * Returns the origin
- */
-export function getOrigin() {
-  // IE10 does not have this property. https://gist.github.com/hbogs/7908703
-  if (!window.location.origin) {
-    return window.location.protocol + '//' + window.location.hostname + (window.location.port ? ':' + window.location.port : '');
-  } else {
-    return window.location.origin;
-  }
-}
 
-/**
- * Returns Do Not Track state
- */
-export function getDNT() {
-  return navigator.doNotTrack === '1' || window.doNotTrack === '1' || navigator.msDoNotTrack === '1' || navigator.doNotTrack === 'yes';
-}
-
-const compareCodeAndSlot = (slot, adUnitCode) => slot.getAdUnitPath() === adUnitCode || slot.getSlotElementId() === adUnitCode;
+export const compareCodeAndSlot = (slot, adUnitCode) => slot.getAdUnitPath() === adUnitCode || slot.getSlotElementId() === adUnitCode;
 
 /**
  * Returns filter function to match adUnitCode in slot
- * @param {Object} slot GoogleTag slot
- * @return {function} filter function
+ * @param slot GoogleTag slot
+ * @return filter function
  */
 export function isAdUnitCodeMatchingSlot(slot) {
-  return (adUnitCode) => compareCodeAndSlot(slot, adUnitCode);
-}
-
-/**
- * Returns filter function to match adUnitCode in slot
- * @param {string} adUnitCode AdUnit code
- * @return {function} filter function
- */
-export function isSlotMatchingAdUnitCode(adUnitCode) {
-  return (slot) => compareCodeAndSlot(slot, adUnitCode);
+  const customGptSlotMatching = config.getConfig('customGptSlotMatching');
+  const match = isFn(customGptSlotMatching) && customGptSlotMatching(slot);
+  return isFn(match) ? match : (adUnitCode) => compareCodeAndSlot(slot, adUnitCode);
 }
 
 /**
@@ -1125,7 +764,7 @@ export function isSlotMatchingAdUnitCode(adUnitCode) {
  * @return {string} warning message to display when condition is met
  */
 export function unsupportedBidderMessage(adUnit, bidder) {
-  const mediaType = Object.keys(adUnit.mediaTypes || {'banner': 'banner'}).join(', ');
+  const mediaType = Object.keys(adUnit.mediaTypes || { 'banner': 'banner' }).join(', ');
 
   return `
     ${adUnit.code} is a ${mediaType} ad unit
@@ -1135,185 +774,436 @@ export function unsupportedBidderMessage(adUnit, bidder) {
 }
 
 /**
- * Delete property from object
- * @param {Object} object
- * @param {string} prop
- * @return {Object} object
+ * Returns a new object with undefined properties removed from given object
+ * @param obj the object to clean
  */
-export function deletePropertyFromObject(object, prop) {
-  let result = Object.assign({}, object);
-  delete result[prop];
-  return result;
+export function cleanObj(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([_, v]) => typeof v !== 'undefined'));
 }
 
 /**
- * Checks input is integer or not
- * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger
- * @param {*} value
+ * Create a new object with selected properties.  Also allows property renaming and transform functions.
+ * @param obj the original object
+ * @param properties An array of desired properties
  */
-export function isInteger(value) {
-  if (Number.isInteger) {
-    return Number.isInteger(value);
-  } else {
-    return typeof value === 'number' && isFinite(value) && Math.floor(value) === value;
+export function pick(obj, properties) {
+  if (typeof obj !== 'object') {
+    return {};
   }
+  return properties.reduce((newObj, prop, i) => {
+    if (typeof prop === 'function') {
+      return newObj;
+    }
+
+    let newProp = prop;
+    const match = prop.match(/^(.+?)\sas\s(.+?)$/i);
+
+    if (match) {
+      prop = match[1];
+      newProp = match[2];
+    }
+
+    let value = obj[prop];
+    if (typeof properties[i + 1] === 'function') {
+      value = properties[i + 1](value, newObj);
+    }
+    if (typeof value !== 'undefined') {
+      newObj[newProp] = value;
+    }
+
+    return newObj;
+  }, {});
+}
+
+export function parseQS(query) {
+  return !query ? {} : query
+    .replace(/^\?/, '')
+    .split('&')
+    .reduce((acc, criteria) => {
+      let [k, v] = criteria.split('=');
+      if (/\[\]$/.test(k)) {
+        k = k.replace('[]', '');
+        acc[k] = acc[k] || [];
+        acc[k].push(v);
+      } else {
+        acc[k] = v || '';
+      }
+      return acc;
+    }, {});
+}
+
+export function formatQS(query) {
+  return Object
+    .keys(query)
+    .map(k => Array.isArray(query[k])
+      ? query[k].map(v => `${k}[]=${v}`).join('&')
+      : `${k}=${query[k]}`)
+    .join('&');
+}
+
+export function parseUrl(url, options) {
+  const parsed = document.createElement('a');
+  if (options && 'noDecodeWholeURL' in options && options.noDecodeWholeURL) {
+    parsed.href = url;
+  } else {
+    parsed.href = decodeURIComponent(url);
+  }
+  // in window.location 'search' is string, not object
+  const qsAsString = (options && 'decodeSearchAsString' in options && options.decodeSearchAsString);
+  return {
+    href: parsed.href,
+    protocol: (parsed.protocol || '').replace(/:$/, ''),
+    hostname: parsed.hostname,
+    port: +parsed.port,
+    pathname: parsed.pathname.replace(/^(?!\/)/, '/'),
+    search: (qsAsString) ? parsed.search : internal.parseQS(parsed.search || ''),
+    hash: (parsed.hash || '').replace(/^#/, ''),
+    host: parsed.host || window.location.host
+  };
+}
+
+export function buildUrl(obj) {
+  return (obj.protocol || 'http') + '://' +
+    (obj.host ||
+      obj.hostname + (obj.port ? `:${obj.port}` : '')) +
+    (obj.pathname || '') +
+    (obj.search ? `?${internal.formatQS(obj.search || '')}` : '') +
+    (obj.hash ? `#${obj.hash}` : '');
 }
 
 /**
- * Converts a string value in camel-case to underscore eg 'placementId' becomes 'placement_id'
- * @param {string} value string value to convert
+ * This function deeply compares two objects checking for their equivalence.
+ * @param {Object} obj1
+ * @param {Object} obj2
+ * @param {Object} [options] - Options for comparison.
+ * @param {boolean} [options.checkTypes=false] - If set, two objects with identical properties but different constructors will *not* be considered equivalent.
+ * @returns {boolean} - Returns `true` if the objects are equivalent, `false` otherwise.
  */
-export function convertCamelToUnderscore(value) {
-  return value.replace(/(?:^|\.?)([A-Z])/g, function (x, y) { return '_' + y.toLowerCase() }).replace(/^_/, '');
+export function deepEqual(obj1, obj2, { checkTypes = false } = {}) {
+  // Quick reference check
+  if (obj1 === obj2) return true;
+
+  // If either is null or not an object, do a direct equality check
+  if (
+    typeof obj1 !== 'object' || obj1 === null ||
+    typeof obj2 !== 'object' || obj2 === null
+  ) {
+    return false;
+  }
+  // Cache the Array checks
+  const isArr1 = Array.isArray(obj1);
+  const isArr2 = Array.isArray(obj2);
+  // Special case: both are arrays
+  if (isArr1 && isArr2) {
+    if (obj1.length !== obj2.length) return false;
+    for (let i = 0; i < obj1.length; i++) {
+      if (!deepEqual(obj1[i], obj2[i], { checkTypes })) {
+        return false;
+      }
+    }
+    return true;
+  } else if (isArr1 || isArr2) {
+    return false;
+  }
+
+  // If we’re checking types, compare constructors (e.g., plain object vs. Date)
+  if (checkTypes && obj1.constructor !== obj2.constructor) {
+    return false;
+  }
+
+  // Compare object keys. Cache keys for both to avoid repeated calls.
+  const keys1 = Object.keys(obj1);
+  const keys2 = Object.keys(obj2);
+
+  if (keys1.length !== keys2.length) return false;
+
+  for (const key of keys1) {
+    // If `obj2` doesn't have this key or sub-values aren't equal, bail out.
+    if (!Object.prototype.hasOwnProperty.call(obj2, key)) {
+      return false;
+    }
+    if (!deepEqual(obj1[key], obj2[key], { checkTypes })) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
-/**
- * Converts an object of arrays (either strings or numbers) into an array of objects containing key and value properties
- * normally read from bidder params
- * eg { foo: ['bar', 'baz'], fizz: ['buzz'] }
- * becomes [{ key: 'foo', value: ['bar', 'baz']}, {key: 'fizz', value: ['buzz']}]
- * @param {Object} keywords object of arrays representing keyvalue pairs
- * @param {string} paramName name of parent object (eg 'keywords') containing keyword data, used in error handling
- */
-export function transformBidderParamKeywords(keywords, paramName = 'keywords') {
-  let arrs = [];
+export function mergeDeep(target, ...sources) {
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i];
+    if (!isPlainObject(source)) {
+      continue;
+    }
+    mergeDeepHelper(target, source);
+  }
+  return target;
+}
 
-  _each(keywords, (v, k) => {
-    if (isArray(v)) {
-      let values = [];
-      _each(v, (val) => {
-        val = getValueString(paramName + '.' + k, val);
-        if (val || val === '') { values.push(val); }
-      });
-      v = values;
+function mergeDeepHelper(target, source) {
+  // quick check
+  if (!isPlainObject(target) || !isPlainObject(source)) {
+    return;
+  }
+
+  const keys = Object.keys(source);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (key === '__proto__' || key === 'constructor') {
+      continue;
+    }
+    const val = source[key];
+
+    if (isPlainObject(val)) {
+      if (!isPlainObject(target[key])) {
+        target[key] = {};
+      }
+      mergeDeepHelper(target[key], val);
+    } else if (Array.isArray(val)) {
+      if (!Array.isArray(target[key])) {
+        target[key] = [...val];
+      } else {
+        // deduplicate
+        val.forEach(obj => {
+          if (!target[key].some(item => deepEqual(item, obj))) {
+            target[key].push(obj);
+          }
+        });
+      }
     } else {
-      v = getValueString(paramName + '.' + k, v);
-      if (isStr(v)) {
-        v = [v];
-      } else {
-        return;
-      } // unsuported types - don't send a key
+      // direct assignment
+      target[key] = val;
     }
-    arrs.push({key: k, value: v});
-  });
-
-  return arrs;
+  }
 }
 
 /**
- * Try to convert a value to a type.
- * If it can't be done, the value will be returned.
- *
- * @param {string} typeToConvert The target type. e.g. "string", "number", etc.
- * @param {*} value The value to be converted into typeToConvert.
+ * returns a hash of a string using a fast algorithm
+ * source: https://stackoverflow.com/a/52171480/845390
+ * @param str
+ * @param seed (optional)
+ * @returns {string}
  */
-function tryConvertType(typeToConvert, value) {
-  if (typeToConvert === 'string') {
-    return value && value.toString();
-  } else if (typeToConvert === 'number') {
-    return Number(value);
-  } else {
-    return value;
-  }
-}
-
-export function convertTypes(types, params) {
-  Object.keys(types).forEach(key => {
-    if (params[key]) {
-      if (isFn(types[key])) {
-        params[key] = types[key](params[key]);
-      } else {
-        params[key] = tryConvertType(types[key], params[key]);
-      }
-
-      // don't send invalid values
-      if (isNaN(params[key])) {
-        delete params.key;
-      }
+export function cyrb53Hash(str, seed = 0) {
+  // IE doesn't support imul
+  // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/imul#Polyfill
+  const imul = function(opA, opB) {
+    if (isFn(Math.imul)) {
+      return Math.imul(opA, opB);
+    } else {
+      opB |= 0; // ensure that opB is an integer. opA will automatically be coerced.
+      // floating points give us 53 bits of precision to work with plus 1 sign bit
+      // automatically handled for our convenience:
+      // 1. 0x003fffff /*opA & 0x000fffff*/ * 0x7fffffff /*opB*/ = 0x1fffff7fc00001
+      //    0x1fffff7fc00001 < Number.MAX_SAFE_INTEGER /*0x1fffffffffffff*/
+      var result = (opA & 0x003fffff) * opB;
+      // 2. We can remove an integer coersion from the statement above because:
+      //    0x1fffff7fc00001 + 0xffc00000 = 0x1fffffff800001
+      //    0x1fffffff800001 < Number.MAX_SAFE_INTEGER /*0x1fffffffffffff*/
+      if (opA & 0xffc00000) result += (opA & 0xffc00000) * opB | 0;
+      return result | 0;
     }
-  });
-  return params;
-}
+  };
 
-export function setDataInLocalStorage(key, value) {
-  if (hasLocalStorage()) {
-    window.localStorage.setItem(key, value);
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0, ch; i < str.length; i++) {
+    ch = str.charCodeAt(i);
+    h1 = imul(h1 ^ ch, 2654435761);
+    h2 = imul(h2 ^ ch, 1597334677);
   }
+  h1 = imul(h1 ^ (h1 >>> 16), 2246822507) ^ imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = imul(h2 ^ (h2 >>> 16), 2246822507) ^ imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString();
 }
 
-export function getDataFromLocalStorage(key) {
-  if (hasLocalStorage()) {
-    return window.localStorage.getItem(key);
-  }
-}
-
-export function hasLocalStorage() {
+/**
+ * returns the result of `JSON.parse(data)`, or undefined if that throws an error.
+ * @param data
+ * @returns {any}
+ */
+export function safeJSONParse(data) {
   try {
-    return !!window.localStorage;
+    return JSON.parse(data);
+  } catch (e) {}
+}
+
+export function safeJSONEncode(data) {
+  try {
+    return JSON.stringify(data);
   } catch (e) {
-    logError('Local storage api disabled');
+    return '';
   }
 }
 
-export function isArrayOfNums(val, size) {
-  return (isArray(val)) && ((size) ? val.length === size : true) && (val.every(v => isInteger(v)));
-}
-
 /**
- * Creates an array of n length and fills each item with the given value
- */
-export function fill(value, length) {
-  let newArray = [];
-
-  for (let i = 0; i < length; i++) {
-    let valueToPush = isPlainObject(value) ? deepClone(value) : value;
-    newArray.push(valueToPush);
-  }
-
-  return newArray;
-}
-
-/**
- * http://npm.im/chunk
- * Returns an array with *size* chunks from given array
+ * Returns a memoized version of `fn`.
  *
- * Example:
- * ['a', 'b', 'c', 'd', 'e'] chunked by 2 =>
- * [['a', 'b'], ['c', 'd'], ['e']]
+ * @param fn
+ * @param key cache key generator, invoked with the same arguments passed to `fn`.
+ *        By default, the first argument is used as key.
+ * @return {*}
  */
-export function chunk(array, size) {
-  let newArray = [];
-
-  for (let i = 0; i < Math.ceil(array.length / size); i++) {
-    let start = i * size;
-    let end = start + size;
-    newArray.push(array.slice(start, end));
-  }
-
-  return newArray;
-}
-
-export function getMinValueFromArray(array) {
-  return Math.min(...array);
-}
-
-export function getMaxValueFromArray(array) {
-  return Math.max(...array);
+export function memoize(fn, key = function (arg) { return arg; }) {
+  const cache = new Map();
+  const memoized = function () {
+    const cacheKey = key.apply(this, arguments);
+    if (!cache.has(cacheKey)) {
+      cache.set(cacheKey, fn.apply(this, arguments));
+    }
+    return cache.get(cacheKey);
+  };
+  memoized.clear = cache.clear.bind(cache);
+  return memoized;
 }
 
 /**
- * This function will create compare function to sort on object property
- * @param {string} property
- * @returns {function} compare function to be used in sorting
+ * Returns a Unix timestamp for given time value and unit.
+ * @param {number} timeValue numeric value, defaults to 0 (which means now)
+ * @param {string} timeUnit defaults to days (or 'd'), use 'm' for minutes. Any parameter that isn't 'd' or 'm' will return Date.now().
+ * @returns {number}
  */
-export function compareOn(property) {
-  return function compare(a, b) {
-    if (a[property] < b[property]) {
-      return 1;
+export function getUnixTimestampFromNow(timeValue = 0, timeUnit = 'd') {
+  const acceptableUnits = ['m', 'd'];
+  if (acceptableUnits.indexOf(timeUnit) < 0) {
+    return Date.now();
+  }
+  const millisecondsOffset = timeUnit === 'm'
+    ? timeValue * 60 * 1000
+    : timeValue * 24 * 60 * 60 * 1000;
+  return Date.now() + (timeValue && timeValue > 0 ? millisecondsOffset : 0);
+}
+
+/**
+ * Converts given object into an array, so {key: 1, anotherKey: 'fred', third: ['fred']} is turned
+ * into [{key: 1}, {anotherKey: 'fred'}, {third: ['fred']}]
+ * @param {Object} obj the object
+ * @returns {Array}
+ */
+export function convertObjectToArray(obj) {
+  return Object.keys(obj).map(key => {
+    return { [key]: obj[key] };
+  });
+}
+
+/**
+ * Sets dataset attributes on a script
+ * @param {HTMLScriptElement} script
+ * @param {object} attributes
+ */
+export function setScriptAttributes(script, attributes) {
+  Object.entries(attributes).forEach(([k, v]) => script.setAttribute(k, v));
+}
+
+/**
+ * Perform a binary search for `el` on an ordered array `arr`.
+ *
+ * @returns the lowest nonnegative integer I that satisfies:
+ *   key(arr[i]) >= key(el) for each i between I and arr.length
+ *
+ *   (if one or more matches are found for `el`, returns the index of the first;
+ *   if the element is not found, return the index of the first element that's greater;
+ *   if no greater element exists, return `arr.length`)
+ */
+export function binarySearch(arr, el, key = (el) => el) {
+  let left = 0;
+  let right = arr.length && arr.length - 1;
+  const target = key(el);
+  while (right - left > 1) {
+    const middle = left + Math.round((right - left) / 2);
+    if (target > key(arr[middle])) {
+      left = middle;
+    } else {
+      right = middle;
     }
-    if (a[property] > b[property]) {
-      return -1;
+  }
+  while (arr.length > left && target > key(arr[left])) {
+    left++;
+  }
+  return left;
+}
+
+/**
+ * Checks if an object has non-serializable properties.
+ * Non-serializable properties are functions and RegExp objects.
+ *
+ * @param {Object} obj - The object to check.
+ * @param {Set} checkedObjects - A set of properties that have already been checked.
+ * @returns {boolean} - Returns true if the object has non-serializable properties, false otherwise.
+ */
+export function hasNonSerializableProperty(obj, checkedObjects = new Set()) {
+  for (const key in obj) {
+    const value = obj[key];
+    const type = typeof value;
+
+    if (
+      value === undefined ||
+      type === 'function' ||
+      type === 'symbol' ||
+      value instanceof RegExp ||
+      value instanceof Map ||
+      value instanceof Set ||
+      value instanceof Date ||
+      (value !== null && type === 'object' && Object.prototype.hasOwnProperty.call(value, 'toJSON'))
+    ) {
+      return true;
     }
-    return 0;
+    if (value !== null && type === 'object' && value.constructor === Object) {
+      if (checkedObjects.has(value)) {
+        // circular reference, means we have a non-serializable property
+        return true;
+      }
+      checkedObjects.add(value);
+      if (hasNonSerializableProperty(value, checkedObjects)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Returns the value of a nested property in an array of objects.
+ *
+ * @param {Array} collection - Array of objects.
+ * @param {String} key - Key of nested property.
+ * @returns {any|undefined} - Value of nested property.
+ */
+export function setOnAny(collection, key) {
+  for (let i = 0, result; i < collection.length; i++) {
+    result = deepAccess(collection[i], key);
+    if (result) {
+      return result;
+    }
+  }
+  return undefined;
+}
+
+export function extractDomainFromHost(pageHost) {
+  let domain = null;
+  try {
+    const domains = /[-\w]+\.([-\w]+|[-\w]{3,}|[-\w]{1,3}\.[-\w]{2})$/i.exec(pageHost);
+    if (domains != null && domains.length > 0) {
+      domain = domains[0];
+      for (let i = 1; i < domains.length; i++) {
+        if (domains[i].length > domain.length) {
+          domain = domains[i];
+        }
+      }
+    }
+  } catch (e) {
+    domain = null;
+  }
+  return domain;
+}
+
+export function triggerNurlWithCpm(bid, cpm) {
+  if (isStr(bid.nurl) && bid.nurl !== '') {
+    bid.nurl = bid.nurl.replace(
+      /\${AUCTION_PRICE}/,
+      cpm
+    );
+    politeTriggerPixel(bid.nurl);
   }
 }

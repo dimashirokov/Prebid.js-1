@@ -1,0 +1,112 @@
+import { registerVideoSupport } from '../src/adServerManager.js';
+import { targeting } from '../src/targeting.js';
+import { buildUrl, isEmpty, isPlainObject, logError, parseUrl } from '../src/utils.js';
+
+/**
+ * Encode publisher cust_params as a GAM-compatible pre-encoded query string.
+ * Keys and values are percent-encoded so reserved characters (e.g. `&`, `=`)
+ * cannot corrupt the request; array values are comma-joined first, matching
+ * the multi-value format GAM expects.
+ * @param {Object} custParams - publisher-supplied key/value pairs.
+ * @returns {string} The encoded `key%3Dvalue%26...` string.
+ */
+function encodeCustParams(custParams) {
+  return Object.entries(custParams)
+    .map(([key, value]) => `${encodeURIComponent(key)}%3D${encodeURIComponent(Array.isArray(value) ? value.join(',') : value)}`)
+    .join('%26');
+}
+
+/**
+ * Merge all the bid data and publisher-supplied options into a single URL, and then return it.
+ * @param {Object} options - The options object.
+ * @param {Object} options.params - params property.
+ * @param {string} options.params.iu - Required iu property.
+ * @param {Object} options.adUnit - adUnit property.
+ * @param {Object} [options.bid] - Optional bid property.
+ * @returns {string|undefined} The generated URL (if neither bid nor adUnit property is provided the generated string is undefined).
+ */
+export function buildVideoUrl(options) {
+  if (!options.params || !options.params?.iu) {
+    logError('buildVideoUrl: Missing required properties.');
+    return;
+  }
+
+  if (!isPlainObject(options.adUnit) && !isPlainObject(options.bid)) {
+    logError('buildVideoUrl: Requires either \'adUnit\' or \'bid\' options value');
+    return;
+  }
+
+  const isURL = /^(https?:\/\/)/i;
+  const defaultParameters = {
+    autoplay: '[autoplay]',
+    mute: '[vpmute]',
+    page_url: '[page_url]',
+    cachebuster: '[timestamp]',
+    gdpr_consent: '[consent]',
+  };
+
+  const adUnit = options.adUnit;
+  const bid = options.bid || targeting.getWinningBids(adUnit.code)[0];
+  const adserverTargeting = (bid && bid.adserverTargeting) || {};
+  const allTargetingData = getAllTargetingData(options);
+  const custParams = options.params.cust_params || {};
+  const iu = options.params.iu;
+
+  if (isURL.test(iu)) {
+    const urlComponents = parseUrl(iu, { noDecodeWholeURL: true });
+
+    for (const [key, value] of Object.entries({ ...allTargetingData, ...adserverTargeting, ...defaultParameters })) {
+      if (!urlComponents.search.hasOwnProperty(key)) {
+        urlComponents.search[key] = value;
+      }
+    }
+
+    if (urlComponents.search.cust_params) {
+      const existingKeys = urlComponents.search.cust_params.split('%26').map((pair) => pair.split('%3D')[0]);
+      for (const [key, value] of Object.entries(custParams)) {
+        if (!existingKeys.includes(encodeURIComponent(key))) {
+          urlComponents.search.cust_params += '%26' + encodeCustParams({ [key]: value });
+        }
+      }
+    }
+
+    if (!isEmpty(custParams) && !urlComponents.search.cust_params) {
+      urlComponents.search.cust_params = encodeCustParams(custParams);
+    }
+
+    return buildUrl(urlComponents);
+  }
+
+  const search = {
+    iu,
+    ...defaultParameters,
+    ...allTargetingData,
+    ...adserverTargeting,
+  };
+
+  if (!isEmpty(custParams)) {
+    search.cust_params = encodeCustParams(custParams);
+  }
+
+  return buildUrl({
+    protocol: 'https',
+    host: 'vid.tvserve.io',
+    pathname: '/ads/bid',
+    search
+  });
+}
+
+function getAllTargetingData(options) {
+  let allTargetingData = {};
+  const adUnit = options && options.adUnit;
+  if (adUnit) {
+    const allTargeting = targeting.getAllTargeting(adUnit.code);
+    allTargetingData = allTargeting ? allTargeting[adUnit.code] : {};
+  }
+
+  return allTargetingData;
+}
+
+registerVideoSupport('targetVideo', {
+  buildVideoUrl,
+});

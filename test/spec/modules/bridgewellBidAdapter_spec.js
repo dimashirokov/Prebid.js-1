@@ -1,172 +1,25 @@
 import { expect } from 'chai';
-import { spec } from 'modules/bridgewellBidAdapter';
-import { newBidder } from 'src/adapters/bidderFactory';
-import * as utils from 'src/utils';
+import { spec } from 'modules/bridgewellBidAdapter.js';
+import { newBidder } from 'src/adapters/bidderFactory.js';
+
+const userId = {
+  'criteoId': 'vYlICF9oREZlTHBGRVdrJTJCUUJnc3U2ckNVaXhrV1JWVUZVSUxzZmJlcnJZR0ZxbVhFRnU5bDAlMkJaUWwxWTlNcmdEeHFrJTJGajBWVlV4T3lFQ0FyRVcxNyUyQlIxa0lLSlFhcWJpTm9PSkdPVkx0JTJCbzlQRTQlM0Q',
+  'pubcid': '074864cb-3705-430e-9ff7-48ccf3c21b94',
+  'sharedid': { 'id': '01F61MX53D786DSB2WYD38ZVM7', 'third': '01F61MX53D786DSB2WYD38ZVM7' },
+  'uid2': { 'id': 'eb33b0cb-8d35-1234-b9c0-1a31d4064777' },
+};
+const userIdAsEids = [{
+  source: 'test.org',
+  uids: [{
+    id: '01**********',
+    atype: 1,
+    ext: {
+      third: '01***********'
+    }
+  }]
+}];
 
 describe('bridgewellBidAdapter', function () {
-  let bidRequests = [
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CLJgEAYYvxUiBXBlbm55KgkIrAIQ-gEaATk'
-      },
-      'adUnitCode': 'adunit-code-1',
-      'sizes': [[300, 250], [300, 600]],
-      'bidId': '30b31c1838de1e',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ'
-      },
-      'adUnitCode': 'adunit-code-2',
-      'sizes': [[728, 90]],
-      'bidId': '3150ccb55da321',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIFcGVubnkqCQisAhD6ARoBOQ'
-      },
-      'adUnitCode': 'adunit-code-1',
-      'sizes': [[300, 250]],
-      'bidId': '42dbe3a7168a6a',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIFcGVubnkqCQisAhD6ARoBOQ',
-        'cpmWeight': 0.5
-      },
-      'adUnitCode': 'adunit-code-1',
-      'sizes': [[300, 250]],
-      'bidId': '42dbe3a7168a6a',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
-        'cpmWeight': -0.5
-      },
-      'adUnitCode': 'adunit-code-2',
-      'sizes': [[728, 90]],
-      'bidId': '3150ccb55da321',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
-      },
-      'adUnitCode': 'adunit-code-2',
-      'sizes': [728, 90],
-      'bidId': '3150ccb55da321',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
-      },
-      'adUnitCode': 'adunit-code-2',
-      'mediaTypes': {
-        'banner': {
-          'sizes': [728, 90]
-        }
-      },
-      'bidId': '3150ccb55da321',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
-      },
-      'adUnitCode': 'adunit-code-2',
-      'sizes': [1, 1],
-      'mediaTypes': {
-        'native': {
-          'title': {
-            'required': true,
-            'len': 15
-          },
-          'body': {
-            'required': true
-          },
-          'image': {
-            'required': true,
-            'sizes': [150, 150]
-          },
-          'icon': {
-            'required': true,
-            'sizes': [50, 50]
-          },
-          'clickUrl': {
-            'required': true
-          },
-          'cta': {
-            'required': true
-          },
-          'sponsoredBy': {
-            'required': true
-          }
-        }
-      },
-      'bidId': '3150ccb55da321',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    },
-    {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
-      },
-      'adUnitCode': 'adunit-code-2',
-      'sizes': [1, 1],
-      'mediaTypes': {
-        'native': {
-          'title': {
-            'required': false,
-            'len': 15
-          },
-          'body': {
-            'required': false
-          },
-          'image': {
-            'required': false,
-            'sizes': [150, 150]
-          },
-          'icon': {
-            'required': false,
-            'sizes': [50, 50]
-          },
-          'clickUrl': {
-            'required': false
-          },
-          'cta': {
-            'required': false
-          },
-          'sponsoredBy': {
-            'required': false
-          }
-        }
-      },
-      'bidId': '3150ccb55da321',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    }
-  ];
   const adapter = newBidder(spec);
 
   describe('inherited functions', function () {
@@ -176,515 +29,452 @@ describe('bridgewellBidAdapter', function () {
   });
 
   describe('isBidRequestValid', function () {
-    let bidWithoutCpmWeight = {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CLJgEAYYvxUiBXBlbm55KgkIrAIQ-gEaATk'
-      },
-      'adUnitCode': 'adunit-code',
-      'sizes': [[300, 250], [300, 600]],
-      'bidId': '30b31c1838de1e',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    };
-
-    let bidWithCorrectCpmWeight = {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CLJgEAYYvxUiBXBlbm55KgkIrAIQ-gEaATk',
-        'cpmWeight': 0.5
-      },
-      'adUnitCode': 'adunit-code',
-      'sizes': [[300, 250], [300, 600]],
-      'bidId': '30b31c1838de1e',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    };
-
-    let bidWithUncorrectCpmWeight = {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CLJgEAYYvxUiBXBlbm55KgkIrAIQ-gEaATk',
-        'cpmWeight': -1.0
-      },
-      'adUnitCode': 'adunit-code',
-      'sizes': [[300, 250], [300, 600]],
-      'bidId': '30b31c1838de1e',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    };
-
-    let bidWithZeroCpmWeight = {
-      'bidder': 'bridgewell',
-      'params': {
-        'ChannelID': 'CLJgEAYYvxUiBXBlbm55KgkIrAIQ-gEaATk',
-        'cpmWeight': 0
-      },
-      'adUnitCode': 'adunit-code',
-      'sizes': [[300, 250], [300, 600]],
-      'bidId': '30b31c1838de1e',
-      'bidderRequestId': '22edbae2733bf6',
-      'auctionId': '1d1a030790a475',
-    };
-
     it('should return true when required params found', function () {
-      expect(spec.isBidRequestValid(bidWithoutCpmWeight)).to.equal(true);
-      expect(spec.isBidRequestValid(bidWithCorrectCpmWeight)).to.equal(true);
-      expect(spec.isBidRequestValid(bidWithUncorrectCpmWeight)).to.equal(false);
-      expect(spec.isBidRequestValid(bidWithZeroCpmWeight)).to.equal(false);
-    });
-
-    it('should return false when required params not found', function () {
-      expect(spec.isBidRequestValid({})).to.equal(false);
-    });
-
-    it('should return false when required params are not passed', function () {
-      let bidWithoutCpmWeight = Object.assign({}, bidWithoutCpmWeight);
-      let bidWithCorrectCpmWeight = Object.assign({}, bidWithCorrectCpmWeight);
-      let bidWithUncorrectCpmWeight = Object.assign({}, bidWithUncorrectCpmWeight);
-      let bidWithZeroCpmWeight = Object.assign({}, bidWithZeroCpmWeight);
-
-      delete bidWithoutCpmWeight.params;
-      delete bidWithCorrectCpmWeight.params;
-      delete bidWithUncorrectCpmWeight.params;
-      delete bidWithZeroCpmWeight.params;
-
-      bidWithoutCpmWeight.params = {
-        'ChannelID': 0
-      };
-
-      bidWithCorrectCpmWeight.params = {
-        'ChannelID': 0
-      };
-
-      bidWithUncorrectCpmWeight.params = {
-        'ChannelID': 0
-      };
-
-      bidWithZeroCpmWeight.params = {
-        'ChannelID': 0
-      };
-
-      expect(spec.isBidRequestValid(bidWithoutCpmWeight)).to.equal(false);
-      expect(spec.isBidRequestValid(bidWithCorrectCpmWeight)).to.equal(false);
-      expect(spec.isBidRequestValid(bidWithUncorrectCpmWeight)).to.equal(false);
-      expect(spec.isBidRequestValid(bidWithZeroCpmWeight)).to.equal(false);
-    });
-  });
-
-  describe('buildRequests', function () {
-    it('should attach valid params to the tag', function () {
-      const request = spec.buildRequests(bidRequests);
-      const payload = request.data;
-      const adUnits = payload.adUnits;
-
-      expect(payload).to.be.an('object');
-      expect(adUnits).to.be.an('array');
-      for (let i = 0, max_i = adUnits.length; i < max_i; i++) {
-        let adUnit = adUnits[i];
-        expect(adUnit).to.have.property('ChannelID').that.is.a('string');
-      }
-    });
-
-    it('should attach validBidRequests to the tag', function () {
-      const request = spec.buildRequests(bidRequests);
-      const validBidRequests = request.validBidRequests;
-      expect(validBidRequests).to.deep.equal(bidRequests);
-    });
-  });
-
-  describe('interpretResponse', function () {
-    const request = spec.buildRequests(bidRequests);
-    const serverResponses = [
-      {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 300,
-        'height': 250,
-        'mediaType': 'banner',
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 728,
-        'height': 90,
-        'mediaType': 'banner',
-        'ad': '<div>test 728x90</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '8f12c646-3b87-4326-a837-c2a76999f168',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 300,
-        'height': 250,
-        'mediaType': 'banner',
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '8f12c646-3b87-4326-a837-c2a76999f168',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 300,
-        'height': 250,
-        'mediaType': 'banner',
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 728,
-        'height': 90,
-        'mediaType': 'banner',
-        'ad': '<div>test 728x90</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 728,
-        'height': 90,
-        'mediaType': 'banner',
-        'ad': '<div>test 728x90</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 728,
-        'height': 90,
-        'mediaType': 'banner',
-        'ad': '<div>test 728x90</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
-          },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
-        },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      },
-      {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
-          },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
-        },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      }
-    ];
-
-    it('should return all required parameters', function () {
-      const result = spec.interpretResponse({'body': serverResponses}, request);
-      result.every(res => expect(res.cpm).to.be.a('number'));
-      result.every(res => expect(res.width).to.be.a('number'));
-      result.every(res => expect(res.height).to.be.a('number'));
-      result.every(res => expect(res.ttl).to.be.a('number'));
-      result.every(res => expect(res.netRevenue).to.be.a('boolean'));
-      result.every(res => expect(res.currency).to.be.a('string'));
-      result.every(res => {
-        if (res.ad) {
-          expect(res.ad).to.be.an('string');
-        } else if (res.native) {
-          expect(res.native).to.be.an('object');
-        }
-      });
-    });
-
-    it('should give up bid if server response is undefiend', function () {
-      const result = spec.interpretResponse({'body': undefined}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if request sizes is missing', function () {
-      let target = Object.assign({}, serverResponses[0]);
-      target.consumed = false;
-      const result = spec.interpretResponse({'body': [target]}, spec.buildRequests([{
+      const validTag = {
         'bidder': 'bridgewell',
         'params': {
           'ChannelID': 'CLJgEAYYvxUiBXBlbm55KgkIrAIQ-gEaATk'
         },
-        'adUnitCode': 'adunit-code-1',
-        'bidId': '30b31c1838de1e',
+      };
+      expect(spec.isBidRequestValid(validTag)).to.equal(true);
+    });
+
+    it('should return true when required params found', function () {
+      const validTag = {
+        'bidder': 'bridgewell',
+        'params': {
+          'cid': 1234
+        },
+      };
+      expect(spec.isBidRequestValid(validTag)).to.equal(true);
+    });
+
+    it('should return false when required params not found', function () {
+      const invalidTag = {
+        'bidder': 'bridgewell',
+        'params': {},
+      };
+      expect(spec.isBidRequestValid(invalidTag)).to.equal(false);
+    });
+
+    it('should return false when required params are empty', function () {
+      const invalidTag = {
+        'bidder': 'bridgewell',
+        'params': {
+          'ChannelID': '',
+        },
+      };
+      expect(spec.isBidRequestValid(invalidTag)).to.equal(false);
+    });
+
+    it('should return false when required params are empty', function () {
+      const invalidTag = {
+        'bidder': 'bridgewell',
+        'params': {
+          'cid': '',
+        },
+      };
+      expect(spec.isBidRequestValid(invalidTag)).to.equal(false);
+    });
+
+    it('should return false when required param cid is not a number', function () {
+      const invalidTag = {
+        'bidder': 'bridgewell',
+        'params': {
+          'cid': 'bad_cid',
+        },
+      };
+      expect(spec.isBidRequestValid(invalidTag)).to.equal(false);
+    });
+  });
+
+  describe('buildRequests', function () {
+    const bidRequests = [
+      {
+        'bidder': 'bridgewell',
+        'params': {
+          'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
+        },
+        'adUnitCode': 'adunit-code-2',
+        'mediaTypes': {
+          'banner': {
+            'sizes': [728, 90]
+          }
+        },
+        'bidId': '3150ccb55da321',
         'bidderRequestId': '22edbae2733bf6',
         'auctionId': '1d1a030790a475',
-      }]));
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if response sizes is invalid', function () {
-      let target = {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if cpm is missing', function () {
-      let target = {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'width': 300,
-        'height': 250,
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if width or height is missing', function () {
-      let target = {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if ad is missing', function () {
-      let target = {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 300,
-        'height': 250,
-        'mediaType': 'banner',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if revenue mode is missing', function () {
-      let target = {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 300,
-        'height': 250,
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if currency is missing', function () {
-      let target = {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 300,
-        'height': 250,
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if mediaType is missing', function () {
-      let target = {
-        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 300,
-        'height': 250,
-        'ad': '<div>test 300x250</div>',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if property native of mediaType native is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if native title is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
-          },
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+        'userId': userId,
+        'userIdAsEids': userIdAsEids,
+      },
+      {
+        'bidder': 'bridgewell',
+        'params': {
+          'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
-
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
-    });
-
-    it('should give up bid if native title is too long', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
-          },
-          'title': 'test-titletest-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+        'adUnitCode': 'adunit-code-2',
+        'sizes': [1, 1],
+        'mediaTypes': {
+          'native': {
+            'title': {
+              'required': true,
+              'len': 15
+            },
+            'body': {
+              'required': true
+            },
+            'image': {
+              'required': true,
+              'sizes': [150, 150]
+            },
+            'icon': {
+              'required': true,
+              'sizes': [50, 50]
+            },
+            'clickUrl': {
+              'required': true
+            },
+            'cta': {
+              'required': true
+            },
+            'sponsoredBy': {
+              'required': true
+            }
+          }
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+        'bidId': '3150ccb55da321',
+        'bidderRequestId': '22edbae2733bf6',
+        'auctionId': '1d1a030790a475',
+        'userId': userId,
+        'userIdAsEids': userIdAsEids,
+      }
+    ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
+    it('should attach valid params to the tag', function () {
+      const bidderRequest = {
+        refererInfo: {
+          page: 'https://www.bridgewell.com/',
+          legacy: {
+            referer: 'https://www.bridgewell.com/',
+          }
+        }
+      };
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      const payload = request.data;
+
+      expect(payload).to.be.an('object');
+      expect(payload.adUnits).to.be.an('array');
+      expect(payload.url).to.exist.and.to.equal('https://www.bridgewell.com/');
+      expect(payload.userIds).to.deep.equal(userId);
+      expect(payload.userIdAsEids).to.deep.equal(userIdAsEids);
+      expect(payload.auctionId).to.equal('1d1a030790a475');
+      expect(payload.bidderRequestId).to.equal('22edbae2733bf6');
+      for (let i = 0, max_i = payload.adUnits.length; i < max_i; i++) {
+        const u = payload.adUnits[i];
+        expect(u).to.have.property('ChannelID').that.is.a('string');
+        expect(u).to.not.have.property('cid');
+        expect(u).to.have.property('adUnitCode').and.to.equal('adunit-code-2');
+        expect(u).to.have.property('requestId').and.to.equal('3150ccb55da321');
+        expect(u).to.have.property('transactionId');
+        expect(u).to.have.property('sizes');
+        expect(u).to.have.property('mediaTypes');
+        expect(u).to.have.property('ortb2Imp');
+      }
     });
 
-    it('should give up bid if native body is missing', function () {
-      let target = {
+    it('should attach valid params to the tag, part2', function() {
+      const bidderRequest = {
+        refererInfo: {
+          page: 'https://www.bridgewell.com/',
+          legacy: {
+            referer: 'https://www.bridgewell.com/'
+          }
+        }
+      };
+      const bidRequests2 = [
+        {
+          'bidder': 'bridgewell',
+          'params': {
+            'cid': 1234,
+          },
+          'adUnitCode': 'adunit-code-2',
+          'mediaTypes': {
+            'banner': {
+              'sizes': [728, 90]
+            }
+          },
+          'bidId': '3150ccb55da321',
+          'bidderRequestId': '22edbae2733bf6',
+          'auctionId': '1d1a030790a475',
+          'userId': userId,
+          'userIdAsEids': userIdAsEids,
+        },
+      ];
+
+      const request = spec.buildRequests(bidRequests2, bidderRequest);
+      const payload = request.data;
+
+      expect(payload).to.be.an('object');
+      expect(payload.adUnits).to.be.an('array');
+      expect(payload.url).to.exist.and.to.equal('https://www.bridgewell.com/');
+      expect(payload.userIds).to.deep.equal(userId);
+      expect(payload.userIdAsEids).to.deep.equal(userIdAsEids);
+      expect(payload.auctionId).to.equal('1d1a030790a475');
+      expect(payload.bidderRequestId).to.equal('22edbae2733bf6');
+      for (let i = 0, max_i = payload.adUnits.length; i < max_i; i++) {
+        const u = payload.adUnits[i];
+        expect(u).to.have.property('cid').that.is.a('number');
+        expect(u).to.not.have.property('ChannelID');
+        expect(u).to.have.property('adUnitCode').and.to.equal('adunit-code-2');
+        expect(u).to.have.property('requestId').and.to.equal('3150ccb55da321');
+        expect(u).to.have.property('transactionId');
+        expect(u).to.have.property('sizes');
+        expect(u).to.have.property('mediaTypes');
+        expect(u).to.have.property('ortb2Imp');
+      }
+    });
+
+    it('should attach validBidRequests to the tag', function () {
+      const bidderRequest = {
+        refererInfo: {
+          page: 'https://www.bridgewell.com/',
+          legacy: {
+            referer: 'https://www.bridgewell.com/',
+          }
+        }
+      };
+
+      const request = spec.buildRequests(bidRequests, bidderRequest);
+      const validBidRequests = request.validBidRequests;
+      expect(validBidRequests).to.deep.equal(bidRequests);
+    });
+
+    it('should include ortb2Imp fields in adUnit', function () {
+      const bidderRequest = {
+        refererInfo: {
+          page: 'https://www.bridgewell.com/',
+          legacy: {
+            referer: 'https://www.bridgewell.com/',
+          }
+        }
+      };
+      const bidRequestsWithOrtb2 = [
+        {
+          'bidder': 'bridgewell',
+          'params': {
+            'cid': 1234,
+          },
+          'adUnitCode': 'adunit-code-1',
+          'transactionId': 'trans-123',
+          'adUnitId': 'adunit-123',
+          'sizes': [[300, 250]],
+          'mediaTypes': {
+            'banner': {
+              'sizes': [[300, 250]]
+            }
+          },
+          'bidId': 'bid-123',
+          'ortb2Imp': {
+            'ext': {
+              'data': {
+                'adserver': {
+                  'name': 'gam',
+                  'adslot': '/1234/test'
+                },
+                'pbadslot': '/1234/test-pbadslot'
+              },
+              'gpid': 'test-gpid',
+              'prebid': {
+                'passthrough': {
+                  'bucket': 'test-bucket',
+                  'client': 'test-client',
+                  'gamAdCode': 'test-gam',
+                  'undefinedField': undefined
+                }
+              }
+            },
+            'banner': {
+              'pos': 1
+            }
+          },
+          'userId': userId,
+          'userIdAsEids': userIdAsEids,
+        }
+      ];
+
+      const request = spec.buildRequests(bidRequestsWithOrtb2, bidderRequest);
+      const adUnit = request.data.adUnits[0];
+
+      expect(adUnit.transactionId).to.equal('trans-123');
+      expect(adUnit.adUnitId).to.equal('adunit-123');
+      expect(adUnit.sizes).to.deep.equal([[300, 250]]);
+      expect(adUnit.ortb2Imp.ext.data.adserver.name).to.equal('gam');
+      expect(adUnit.ortb2Imp.ext.data.adserver.adslot).to.equal('/1234/test');
+      expect(adUnit.ortb2Imp.ext.data.pbadslot).to.equal('/1234/test-pbadslot');
+      expect(adUnit.ortb2Imp.ext.gpid).to.equal('test-gpid');
+      expect(adUnit.ortb2Imp.banner.pos).to.equal(1);
+      expect(adUnit.ortb2Imp.ext.prebid.passthrough).to.deep.equal({
+        bucket: 'test-bucket',
+        client: 'test-client',
+        gamAdCode: 'test-gam'
+      });
+      expect(adUnit.ortb2Imp.ext.prebid.passthrough).to.not.have.property('undefinedField');
+    });
+
+    it('should include floor information when getFloor is available', function () {
+      const bidderRequest = {
+        refererInfo: {
+          page: 'https://www.bridgewell.com/',
+          legacy: {
+            referer: 'https://www.bridgewell.com/',
+          }
+        }
+      };
+      const bidRequestsWithFloor = [
+        {
+          'bidder': 'bridgewell',
+          'params': {
+            'cid': 1234,
+          },
+          'adUnitCode': 'adunit-code-1',
+          'mediaTypes': {
+            'banner': {
+              'sizes': [[300, 250]]
+            }
+          },
+          'bidId': 'bid-123',
+          'getFloor': function() {
+            return {
+              floor: 1.5,
+              currency: 'USD'
+            };
+          },
+          'userId': userId,
+          'userIdAsEids': userIdAsEids,
+        }
+      ];
+
+      const request = spec.buildRequests(bidRequestsWithFloor, bidderRequest);
+      const adUnit = request.data.adUnits[0];
+
+      expect(adUnit.floor).to.equal(1.5);
+      expect(adUnit.currency).to.equal('USD');
+    });
+
+    it('should include additional bid request fields in payload', function () {
+      const bidderRequest = {
+        refererInfo: {
+          page: 'https://www.bridgewell.com/',
+          ref: 'https://www.referrer.com/',
+          legacy: {
+            referer: 'https://www.bridgewell.com/',
+          }
+        },
+        ortb2: {
+          site: {
+            name: 'test-site'
+          }
+        }
+      };
+      const bidRequestsWithMetrics = [
+        {
+          'bidder': 'bridgewell',
+          'params': {
+            'cid': 1234,
+          },
+          'adUnitCode': 'adunit-code-1',
+          'mediaTypes': {
+            'banner': {
+              'sizes': [[300, 250]]
+            }
+          },
+          'bidId': 'bid-123',
+          'bidderRequestId': 'bidder-req-123',
+          'auctionId': 'auction-123',
+          'src': 's2s',
+          'auctionsCount': 5,
+          'bidRequestsCount': 10,
+          'bidderRequestsCount': 3,
+          'bidderWinsCount': 2,
+          'deferBilling': true,
+          'metrics': {
+            'test': 'metric'
+          },
+          'userId': userId,
+          'userIdAsEids': userIdAsEids,
+        }
+      ];
+
+      const request = spec.buildRequests(bidRequestsWithMetrics, bidderRequest);
+      const payload = request.data;
+
+      expect(payload.auctionId).to.equal('auction-123');
+      expect(payload.bidderRequestId).to.equal('bidder-req-123');
+      expect(payload.src).to.equal('s2s');
+      expect(payload.auctionsCount).to.equal(5);
+      expect(payload.bidRequestsCount).to.equal(10);
+      expect(payload.bidderRequestsCount).to.equal(3);
+      expect(payload.bidderWinsCount).to.equal(2);
+      expect(payload.deferBilling).to.equal(true);
+      expect(payload.metrics).to.deep.equal({ test: 'metric' });
+      expect(payload.referrer).to.equal('https://www.referrer.com/');
+      expect(payload.ortb2).to.deep.equal({ site: { name: 'test-site' } });
+    });
+  });
+
+  describe('interpretResponse', function () {
+    const nativeBidRequests = {
+      validBidRequests: [
+        {
+          'bidder': 'bridgewell',
+          'params': {
+            'ChannelID': 'CgUxMjMzOBIBNiIGcGVubnkzKggI2AUQWhoBOQ',
+          },
+          'adUnitCode': 'adunit-code-2',
+          'sizes': [1, 1],
+          'mediaTypes': {
+            'native': {
+              'title': {
+                'required': true,
+                'len': 15
+              },
+              'body': {
+                'required': true
+              },
+              'image': {
+                'required': true,
+                'sizes': [150, 150]
+              },
+              'icon': {
+                'required': true,
+                'sizes': [50, 50]
+              },
+              'clickUrl': {
+                'required': true
+              },
+              'cta': {
+                'required': true
+              },
+              'sponsoredBy': {
+                'required': true
+              }
+            }
+          },
+          'bidId': '3150ccb55da321',
+          'bidderRequestId': '22edbae2733bf6',
+          'auctionId': '1d1a030790a475',
+        },
+      ]
+    };
+
+    const nativeServerResponses = [
+      {
         'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
         'bidder_code': 'bridgewell',
-        'cpm': 5.0,
+        'cpm': 7.0,
         'width': 1,
         'height': 1,
+        'adomain': ['response.com'],
         'mediaType': 'native',
         'native': {
           'image': {
@@ -694,6 +484,7 @@ describe('bridgewellBidAdapter', function () {
           },
           'title': 'test-title',
           'sponsoredBy': 'test-sponsoredBy',
+          'body': 'test-body',
           'icon': {
             'url': 'https://img.scupio.com/test/test-icon.jpg',
             'width': 50,
@@ -703,19 +494,378 @@ describe('bridgewellBidAdapter', function () {
           'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
           'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
         },
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      },
+    ];
+
+    const bannerBidRequests = {
+      validBidRequests: [
+        {
+          'mediaTypes': {
+            'banner': {
+              'sizes': [300, 250]
+            }
+          },
+          'bidId': '3150ccb55da321',
+        },
+      ]
+    };
+
+    const bannerServerResponses = [
+      {
+        'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
+        'bidder_code': 'bridgewell',
+        'cpm': 5.0,
+        'width': 300,
+        'height': 250,
+        'adomain': ['response.com'],
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
         'ttl': 360,
         'netRevenue': true,
         'currency': 'NTD'
-      };
+      },
+    ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+    it('should return all required parameters', function () {
+      const result = spec.interpretResponse({ 'body': nativeServerResponses }, nativeBidRequests);
+
+      expect(result[0].requestId).to.equal('3150ccb55da321');
+      expect(result[0].cpm).to.equal(7.0);
+      expect(result[0].width).to.equal(1);
+      expect(result[0].height).to.equal(1);
+      expect(result[0].ttl).to.equal(400);
+      expect(result[0].creativeId).to.equal('0e4048d3-5c74-4380-a21a-00ba35629f7d');
+      expect(result[0].netRevenue).to.equal(true);
+      expect(result[0].currency).to.equal('NTD');
+      expect(result[0].mediaType).to.equal('native');
+      expect(result[0].native.image.url).to.equal('https://img.scupio.com/test/test-image.jpg');
+      expect(String(result[0].meta.advertiserDomains)).to.equal('response.com');
+    });
+
+    it('should return all required parameters banner', function () {
+      const result = spec.interpretResponse({ 'body': bannerServerResponses }, bannerBidRequests);
+
+      expect(result[0].requestId).to.equal('3150ccb55da321');
+      expect(result[0].cpm).to.equal(5.0);
+      expect(result[0].width).to.equal(300);
+      expect(result[0].height).to.equal(250);
+      expect(result[0].ttl).to.equal(360);
+      expect(result[0].creativeId).to.equal('e5b10774-32bf-4931-85ee-05095e8cff21');
+      expect(result[0].netRevenue).to.equal(true);
+      expect(result[0].currency).to.equal('NTD');
+      expect(result[0].mediaType).to.equal('banner');
+      expect(result[0].ad).to.equal('<div>test 300x250</div>');
+      expect(String(result[0].meta.advertiserDomains)).to.equal('response.com');
+    });
+
+    it('should give up bid if server response is undefined', function () {
+      let result = spec.interpretResponse({ 'body': undefined }, bannerBidRequests);
+
       expect(result).to.deep.equal([]);
+    });
 
-      it('should give up bid if native image url is missing', function () {
-        let target = {
-          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+    it('should give up bid if request sizes is missing', function () {
+      const request = {
+        validBidRequests: [
+          {
+            'mediaTypes': {
+              'banner': {}
+            },
+            'bidId': '3150ccb55da321',
+          },
+        ]
+      };
+      const result = spec.interpretResponse({ 'body': bannerServerResponses }, request);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if response sizes is invalid', function () {
+      const request = {
+        validBidRequests: [
+          {
+            'mediaTypes': {
+              'banner': {
+                'sizes': [728, 90]
+              }
+            },
+            'bidId': '3150ccb55da321',
+          },
+        ]
+      };
+      const result = spec.interpretResponse({ 'body': bannerServerResponses }, request);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if cpm is missing', function () {
+      const response = [
+        {
+          'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
+          'bidder_code': 'bridgewell',
+          'width': 300,
+          'height': 250,
+          'mediaType': 'banner',
+          'ad': '<div>test 300x250</div>',
+          'ttl': 360,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, bannerBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if width or height is missing', function () {
+      const response = [
+        {
+          'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
           'bidder_code': 'bridgewell',
           'cpm': 5.0,
+          'mediaType': 'banner',
+          'ad': '<div>test 300x250</div>',
+          'ttl': 360,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, bannerBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if ad is missing', function () {
+      const response = [
+        {
+          'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
+          'bidder_code': 'bridgewell',
+          'cpm': 5.0,
+          'width': 300,
+          'height': 250,
+          'mediaType': 'banner',
+          'ttl': 360,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, bannerBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if revenue mode is missing', function () {
+      const response = [
+        {
+          'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
+          'bidder_code': 'bridgewell',
+          'cpm': 5.0,
+          'width': 300,
+          'height': 250,
+          'mediaType': 'banner',
+          'ad': '<div>test 300x250</div>',
+          'ttl': 360,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, bannerBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if currency is missing', function () {
+      const response = [
+        {
+          'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
+          'bidder_code': 'bridgewell',
+          'cpm': 5.0,
+          'width': 300,
+          'height': 250,
+          'mediaType': 'banner',
+          'ad': '<div>test 300x250</div>',
+          'ttl': 360,
+          'netRevenue': true,
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, bannerBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if mediaType is missing', function () {
+      const response = [
+        {
+          'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
+          'bidder_code': 'bridgewell',
+          'cpm': 5.0,
+          'width': 300,
+          'height': 250,
+          'ad': '<div>test 300x250</div>',
+          'ttl': 360,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, bannerBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if mediaType is not support', function () {
+      const responses = [
+        {
+          'id': 'e5b10774-32bf-4931-85ee-05095e8cff21',
+          'bidder_code': 'bridgewell',
+          'cpm': 5.0,
+          'width': 300,
+          'height': 250,
+          'mediaType': 'superNiceAd',
+          'ad': '<div>test 300x250</div>',
+          'ttl': 360,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': responses }, bannerBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if property native of mediaType native is missing', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if native title is missing', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          },
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if native title is too long', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-titletest-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          },
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if native body is missing', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          },
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
+        },
+      ];
+
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should give up bid if native image url is missing', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
           'width': 1,
           'height': 1,
           'mediaType': 'native',
@@ -736,429 +886,639 @@ describe('bridgewellBidAdapter', function () {
             'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
             'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'ttl': 360,
+          'ttl': 400,
           'netRevenue': true,
           'currency': 'NTD'
-        };
+        },
+      ];
 
-        const result = spec.interpretResponse({'body': [target]}, request);
-        expect(result).to.deep.equal([]);
-      });
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
+      expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native image is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
-    it('should give up bid if native image url is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
+    it('should give up bid if native image is empty', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {},
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
-    it('should give up bid if native image sizes is unmatch', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg'
+    it('should give up bid if native image sizes is missing', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg'
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native sponsoredBy is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native icon is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native icon url is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
-    it('should give up bid if native icon sizes is unmatch', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+    it('should give up bid if native icon sizes is missing', function () {
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg'
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native clickUrl is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native clickTrackers is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native clickTrackers is empty', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': [],
+            'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': [],
-          'impressionTrackers': ['https://img.scupio.com/test-impressionTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native impressionTrackers is missing', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker']
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
     it('should give up bid if native impressionTrackers is empty', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
-        'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'native',
-        'native': {
-          'image': {
-            'url': 'https://img.scupio.com/test/test-image.jpg',
-            'width': 150,
-            'height': 150
+      const response = [
+        {
+          'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+          'bidder_code': 'bridgewell',
+          'cpm': 7.0,
+          'width': 1,
+          'height': 1,
+          'mediaType': 'native',
+          'native': {
+            'image': {
+              'url': 'https://img.scupio.com/test/test-image.jpg',
+              'width': 150,
+              'height': 150
+            },
+            'title': 'test-title',
+            'sponsoredBy': 'test-sponsoredBy',
+            'body': 'test-body',
+            'icon': {
+              'url': 'https://img.scupio.com/test/test-icon.jpg',
+              'width': 50,
+              'height': 50
+            },
+            'clickUrl': 'https://img.scupio.com/test-clickUrl',
+            'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
+            'impressionTrackers': []
           },
-          'title': 'test-title',
-          'sponsoredBy': 'test-sponsoredBy',
-          'body': 'test-body',
-          'icon': {
-            'url': 'https://img.scupio.com/test/test-icon.jpg',
-            'width': 50,
-            'height': 50
-          },
-          'clickUrl': 'https://img.scupio.com/test-clickUrl',
-          'clickTrackers': ['https://img.scupio.com/test-clickTracker'],
-          'impressionTrackers': []
+          'ttl': 400,
+          'netRevenue': true,
+          'currency': 'NTD'
         },
-        'ttl': 360,
-        'netRevenue': true,
-        'currency': 'NTD'
-      };
+      ];
 
-      const result = spec.interpretResponse({'body': [target]}, request);
+      const result = spec.interpretResponse({ 'body': response }, nativeBidRequests);
       expect(result).to.deep.equal([]);
     });
 
-    it('should give up bid if mediaType is not support', function () {
-      let target = {
-        'id': '0e4048d3-5c74-4380-a21a-00ba35629f7d',
+    it('should contain every request bid id in responses', function () {
+      const request = {
+        validBidRequests: [
+          {
+            'mediaTypes': {
+              'banner': {
+                'sizes': [300, 250]
+              }
+            },
+            'bidId': '3150ccb55da321',
+          },
+          {
+            'mediaTypes': {
+              'banner': {
+                'sizes': [300, 250]
+              }
+            },
+            'bidId': '3150ccb55da322',
+          }
+        ],
+      };
+      const response = [{
+        'id': '0cd250f4-f40e-4a78-90f5-5168eb0a97e9',
         'bidder_code': 'bridgewell',
-        'cpm': 5.0,
-        'width': 1,
-        'height': 1,
-        'mediaType': 'superNiceAd',
-        'ttl': 360,
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
         'netRevenue': true,
         'currency': 'NTD'
+      }, {
+        'id': '8a740063-6820-45e4-b01f-34ce9b38e858',
+        'bidder_code': 'bridgewell',
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      }];
+      const result = spec.interpretResponse({ 'body': response }, request);
+      const actualBidId = result.map(obj => obj.requestId);
+      const expectedBidId = ['3150ccb55da321', '3150ccb55da322'];
+
+      expect(actualBidId).to.include(expectedBidId[0]).and.to.include(expectedBidId[1]);
+    });
+
+    it('should have 2 consumed responses when two requests with same sizes are given', function () {
+      const request = {
+        validBidRequests: [
+          {
+            'mediaTypes': {
+              'banner': {
+                'sizes': [300, 250]
+              }
+            },
+            'bidId': '3150ccb55da321',
+          },
+          {
+            'mediaTypes': {
+              'banner': {
+                'sizes': [300, 250]
+              }
+            },
+            'bidId': '3150ccb55da322',
+          }
+        ],
+      };
+      const response = [{
+        'id': '0cd250f4-f40e-4a78-90f5-5168eb0a97e9',
+        'bidder_code': 'bridgewell',
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      }, {
+        'id': '8a740063-6820-45e4-b01f-34ce9b38e858',
+        'bidder_code': 'bridgewell',
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      }];
+      const reducer = function(accumulator, currentValue) {
+        if (currentValue.consumed) accumulator++;
+        return accumulator;
       };
 
-      const result = spec.interpretResponse({'body': [target]}, request);
-      expect(result).to.deep.equal([]);
+      spec.interpretResponse({ 'body': response }, request);
+      expect(response.reduce(reducer, 0)).to.equal(2);
+    });
+
+    it('should use adUnitCode to build bidResponses', function () {
+      const request = {
+        validBidRequests: [
+          {
+            'adUnitCode': 'div-gpt-ad-1564632520056-0',
+            'bidId': '3150ccb55da321',
+          },
+          {
+            'adUnitCode': 'div-gpt-ad-1564632520056-1',
+            'bidId': '3150ccb55da322',
+          }
+        ],
+      };
+      const response = [{
+        'id': '0cd250f4-f40e-4a78-90f5-5168eb0a97e9',
+        'bidder_code': 'bridgewell',
+        'adUnitCode': 'div-gpt-ad-1564632520056-0',
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      }, {
+        'id': '8a740063-6820-45e4-b01f-34ce9b38e858',
+        'bidder_code': 'bridgewell',
+        'adUnitCode': 'div-gpt-ad-1564632520056-1',
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      }];
+      const result = spec.interpretResponse({ 'body': response }, request);
+      const actualBidId = result.map(obj => obj.requestId);
+      const expectedBidId = ['3150ccb55da321', '3150ccb55da322'];
+
+      expect(actualBidId).to.include(expectedBidId[0]).and.to.include(expectedBidId[1]);
+    });
+
+    it('should use size to match when adUnitCode is empty string in server response', function () {
+      const request = {
+        validBidRequests: [
+          {
+            'mediaTypes': {
+              'banner': {
+                'sizes': [300, 250]
+              }
+            },
+            'adUnitCode': 'div-gpt-ad-1564632520056-0',
+            'bidId': '3150ccb55da321',
+          },
+          {
+            'mediaTypes': {
+              'banner': {
+                'sizes': [300, 250]
+              }
+            },
+            'adUnitCode': 'div-gpt-ad-1564632520056-1',
+            'bidId': '3150ccb55da322',
+          }
+        ],
+      };
+      const response = [{
+        'id': '0cd250f4-f40e-4a78-90f5-5168eb0a97e9',
+        'bidder_code': 'bridgewell',
+        'adUnitCode': '',
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      }, {
+        'id': '8a740063-6820-45e4-b01f-34ce9b38e858',
+        'bidder_code': 'bridgewell',
+        'adUnitCode': '',
+        'cpm': 7.0,
+        'width': 300,
+        'height': 250,
+        'mediaType': 'banner',
+        'ad': '<div>test 300x250</div>',
+        'ttl': 400,
+        'netRevenue': true,
+        'currency': 'NTD'
+      }];
+      const result = spec.interpretResponse({ 'body': response }, request);
+      const actualBidId = result.map(obj => obj.requestId);
+      const expectedBidId = ['3150ccb55da321', '3150ccb55da322'];
+
+      expect(actualBidId).to.include(expectedBidId[0]).and.to.include(expectedBidId[1]);
     });
   });
 });

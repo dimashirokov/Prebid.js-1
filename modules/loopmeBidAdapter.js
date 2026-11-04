@@ -1,99 +1,49 @@
-import * as utils from '../src/utils';
-import { registerBidder } from '../src/adapters/bidderFactory';
-import { BANNER } from '../src/mediaTypes';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER, VIDEO, NATIVE } from '../src/mediaTypes.js';
+import { ortbConverter } from '../libraries/ortbConverter/converter.js';
+import { pbsExtensions } from '../libraries/pbsExtensions/pbsExtensions.js';
+import { deepSetValue } from '../src/utils.js';
 
-const LOOPME_ENDPOINT = 'https://loopme.me/api/hb';
+const BIDDER_CODE = 'loopme';
+const url = 'https://prebid.loopmertb.com/';
+const GVLID = 109;
 
-const entries = (obj) => {
-  let output = [];
-  for (let key in obj) {
-    if (obj.hasOwnProperty(key)) {
-      output.push([key, obj[key]])
-    }
+export const converter = ortbConverter({
+  processors: pbsExtensions,
+  context: {
+    netRevenue: true,
+    ttl: 30
+  },
+  imp(buildImp, bidRequest, context) {
+    const imp = buildImp(bidRequest, context);
+    deepSetValue(imp, 'ext.bidder', { ...bidRequest.params });
+    return imp;
+  },
+  request(buildRequest, imps, bidderRequest, context) {
+    const req = buildRequest(imps, bidderRequest, context);
+    req.at = 1;
+    return req;
   }
-  return output;
-}
+});
 
 export const spec = {
-  code: 'loopme',
-  supportedMediaTypes: [BANNER],
-  /**
-   * @param {object} bid
-   * @return boolean
-   */
-  isBidRequestValid: function(bid) {
-    if (typeof bid.params !== 'object') {
-      return false;
-    }
+  supportedMediaTypes: [BANNER, VIDEO, NATIVE],
+  code: BIDDER_CODE,
+  gvlid: GVLID,
 
-    return !!bid.params.ak;
-  },
-  /**
-   * @param {BidRequest[]} bidRequests
-   * @param bidderRequest
-   * @return ServerRequest[]
-   */
-  buildRequests: function(bidRequests, bidderRequest) {
-    return bidRequests.map(bidRequest => {
-      bidRequest.startTime = new Date().getTime();
-      let payload = bidRequest.params;
+  isBidRequestValid: ({ params = {} }) => Boolean(params.publisherId),
 
-      if (bidderRequest && bidderRequest.gdprConsent) {
-        payload.user_consent = bidderRequest.gdprConsent.consentString;
-      }
+  buildRequests: (bidRequests, bidderRequest) =>
+    ({ url, method: 'POST', data: converter.toORTB({ bidRequests, bidderRequest }) }),
 
-      let queryString = entries(payload)
-        .map(item => `${item[0]}=${encodeURI(item[1])}`)
-        .join('&');
+  interpretResponse: ({ body }, { data }) => converter.fromORTB({ request: data, response: body }).bids,
 
-      const sizes =
-        '&sizes=' +
-        utils
-          .getAdUnitSizes(bidRequest)
-          .map(size => `${size[0]}x${size[1]}`)
-          .join('&sizes=');
-
-      queryString = `${queryString}${sizes}`;
-
-      return {
-        method: 'GET',
-        url: `${LOOPME_ENDPOINT}`,
-        options: { withCredentials: false },
-        bidId: bidRequest.bidId,
-        data: queryString
-      };
-    });
-  },
-  /**
-   * @param {*} responseObj
-   * @param {BidRequest} bidRequest
-   * @return {Bid[]} An array of bids which
-   */
-  interpretResponse: function(response = {}, bidRequest) {
-    const responseObj = response.body;
-
-    if (
-      responseObj == null ||
-      typeof responseObj !== 'object' ||
-      !responseObj.hasOwnProperty('ad')
-    ) {
-      return [];
-    }
-
-    return [
-      {
-        requestId: bidRequest.bidId,
-        cpm: responseObj.cpm,
-        width: responseObj.width,
-        height: responseObj.height,
-        ad: responseObj.ad,
-        ttl: responseObj.ttl,
-        currency: responseObj.currency,
-        creativeId: responseObj.creativeId,
-        dealId: responseObj.dealId,
-        netRevenue: responseObj.netRevenue
-      }
-    ];
-  }
+  getUserSyncs: (syncOptions, serverResponses) =>
+    serverResponses.flatMap(({ body }) =>
+      (body.ext?.usersyncs || [])
+        .filter(({ type }) => type === 'image' || type === 'iframe')
+        .filter(({ url }) => url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')))
+        .filter(({ type }) => (type === 'image' && syncOptions.pixelEnabled) || (type === 'iframe' && syncOptions.iframeEnabled))
+    )
 };
 registerBidder(spec);

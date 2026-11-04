@@ -1,91 +1,84 @@
-import {registerBidder} from '../src/adapters/bidderFactory';
-import { BANNER, NATIVE, VIDEO } from '../src/mediaTypes';
-import * as utils from '../src/utils';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER, NATIVE, VIDEO } from '../src/mediaTypes.js';
+import { convertOrtbRequestToProprietaryNative } from '../src/native.js';
+import { getAdUrlByRegion } from '../libraries/smartyadsUtils/getAdUrlByRegion.js';
+import { interpretResponse, getUserSyncs } from '../libraries/teqblazeUtils/bidderUtils.js';
 
 const BIDDER_CODE = 'smartyads';
-const URL = '//ssp-nj.webtradehub.com/?c=o&m=multi';
-const URL_SYNC = '//ssp-nj.webtradehub.com/?c=o&m=cookie';
+const GVLID = 534;
 
-function isBidResponseValid(bid) {
-  if (!bid.requestId || !bid.cpm || !bid.creativeId ||
-    !bid.ttl || !bid.currency) {
-    return false;
-  }
-  switch (bid['mediaType']) {
-    case BANNER:
-      return Boolean(bid.width && bid.height && bid.ad);
-    case VIDEO:
-      return Boolean(bid.vastUrl);
-    case NATIVE:
-      return Boolean(bid.title && bid.image && bid.impressionTrackers);
-    default:
-      return false;
-  }
-}
+const URL_SYNC = 'https://as.ck-ie.com/prebidjs?p=7c47322e527cf8bdeb7facc1bb03387a';
 
 export const spec = {
   code: BIDDER_CODE,
+  gvlid: GVLID,
   supportedMediaTypes: [BANNER, VIDEO, NATIVE],
 
   isBidRequestValid: (bid) => {
-    return Boolean(bid.bidId && bid.params && !isNaN(bid.params.placementId));
+    return Boolean(bid.bidId && bid.params && !isNaN(bid.params.sourceid) && !isNaN(bid.params.accountid) && bid.params.host === 'prebid');
   },
 
-  buildRequests: (validBidRequests = []) => {
-    let winTop = window;
-    try {
-      window.top.location.toString();
-      winTop = window.top;
-    } catch (e) {
-      utils.logMessage(e);
-    }
-    let location = utils.getTopWindowLocation();
-    let placements = [];
-    let request = {
+  buildRequests: (validBidRequests = [], bidderRequest) => {
+    // convert Native ORTB definition to old-style prebid native definition
+    validBidRequests = convertOrtbRequestToProprietaryNative(validBidRequests);
+
+    const winTop = window;
+    let location;
+    location = bidderRequest?.refererInfo ?? null;
+    const placements = [];
+    const request = {
       'deviceWidth': winTop.screen.width,
       'deviceHeight': winTop.screen.height,
-      'language': (navigator && navigator.language) ? navigator.language : '',
-      'secure': location.protocol === 'https:' ? 1 : 0,
-      'host': location.host,
-      'page': location.pathname,
-      'placements': placements
+      'host': location?.domain ?? '',
+      'page': location?.page ?? '',
+      'coppa': bidderRequest?.ortb2?.regs?.coppa === 1 ? 1 : 0,
+      'placements': placements,
+      'eeid': validBidRequests[0]?.userIdAsEids,
+      'ifa': bidderRequest?.ortb2?.device?.ifa,
     };
+
+    const schain = bidderRequest?.ortb2?.source?.schain || bidderRequest?.ortb2?.source?.ext?.schain;
+    if (schain) {
+      request.schain = schain;
+    }
+
+    if (bidderRequest) {
+      if (bidderRequest.gdprConsent) {
+        request.gdpr = bidderRequest.gdprConsent;
+      }
+      if (bidderRequest.gppConsent) {
+        request.gpp = bidderRequest.gppConsent;
+      }
+    }
     const len = validBidRequests.length;
+
+    let adUrl;
+
     for (let i = 0; i < len; i++) {
-      let bid = validBidRequests[i];
+      const bid = validBidRequests[i];
+
+      if (i === 0) adUrl = getAdUrlByRegion(bid);
+
+      const traff = bid.params.traffic || BANNER;
+
       placements.push({
-        placementId: bid.params.placementId,
+        placementId: bid.params.sourceid,
         bidId: bid.bidId,
-        traffic: bid.params.traffic || BANNER
+        sizes: bid.mediaTypes && bid.mediaTypes[traff] && bid.mediaTypes[traff].sizes ? bid.mediaTypes[traff].sizes : [],
+        traffic: traff,
+        publisherId: bid.params.accountid
       });
     }
+
     return {
       method: 'POST',
-      url: URL,
+      url: adUrl,
       data: request
     };
   },
 
-  interpretResponse: (serverResponse) => {
-    let response = [];
-    serverResponse = serverResponse.body;
-    for (let i = 0; i < serverResponse.length; i++) {
-      let resItem = serverResponse[i];
-      if (isBidResponseValid(resItem)) {
-        delete resItem.mediaType;
-        response.push(resItem);
-      }
-    }
-    return response;
-  },
-
-  getUserSyncs: (syncOptions, serverResponses) => {
-    return [{
-      type: 'image',
-      url: URL_SYNC
-    }];
-  }
-
+  interpretResponse,
+  getUserSyncs: getUserSyncs(URL_SYNC),
 };
 
 registerBidder(spec);

@@ -1,18 +1,28 @@
-import * as utils from '../src/utils';
+import { logInfo, isEmpty, deepAccess, parseUrl, parseSizesInput, _map } from '../src/utils.js';
 import {
   BANNER,
   NATIVE,
   VIDEO
-} from '../src/mediaTypes';
+} from '../src/mediaTypes.js';
 import {
   registerBidder
-} from '../src/adapters/bidderFactory';
-import {
-  parse as parseUrl
-} from '../src/url';
+} from '../src/adapters/bidderFactory.js';
+import { convertOrtbRequestToProprietaryNative } from '../src/native.js';
+import { getConnectionInfo } from '../libraries/connectionInfo/connectionUtils.js';
+import { getDNT } from '../libraries/dnt/index.js';
+
+/**
+ * @typedef {import('../src/adapters/bidderFactory.js').BidRequest} BidRequest
+ * @typedef {import('../src/adapters/bidderFactory.js').Bid} Bid
+ * @typedef {import('../src/adapters/bidderFactory.js').ServerResponse} ServerResponse
+ * @typedef {import('../src/adapters/bidderFactory.js').SyncOptions} SyncOptions
+ * @typedef {import('../src/adapters/bidderFactory.js').UserSync} UserSync
+ * @typedef {import('../src/adapters/bidderFactory.js').validBidRequests} validBidRequests
+ */
 
 const BIDDER_CODE = 'theadx';
-const ENDPOINT_URL = '//ssp.theadx.com/request';
+const ENDPOINT_URL = 'https://ssp.theadx.com/request';
+const ENDPOINT_TR_URL = 'https://ssptr.theadx.com/request';
 
 const NATIVEASSETNAMES = {
   0: 'title',
@@ -118,7 +128,7 @@ const NATIVEPROBS = {
 
 export const spec = {
   code: BIDDER_CODE,
-  aliases: ['theadx'], // short code
+  aliases: ['theadx', 'theAdx'], // short code
   supportedMediaTypes: [BANNER, VIDEO, NATIVE],
 
   /**
@@ -128,7 +138,7 @@ export const spec = {
    * @return boolean True if this is a valid bid, and false otherwise.
    */
   isBidRequestValid: function (bid) {
-    utils.logInfo('theadx.isBidRequestValid', bid);
+    logInfo('theadx.isBidRequestValid', bid);
     let res = false;
     if (bid && bid.params) {
       res = !!(bid.params.pid && bid.params.tagId);
@@ -140,30 +150,36 @@ export const spec = {
   /**
    * Make a server request from the list of BidRequests.
    *
-   * @param {validBidRequests[]} - an array of bids
-   * @return ServerRequest Info describing the request to the server.
+   * @param {BidRequest[]} validBidRequests - an array of bids
+   * @param {Object} bidderRequest
+   * @return {Object} Info describing the request to the server.
    */
   buildRequests: function (validBidRequests, bidderRequest) {
-    utils.logInfo('theadx.buildRequests', 'validBidRequests', validBidRequests, 'bidderRequest', bidderRequest);
+    // convert Native ORTB definition to old-style prebid native definition
+    validBidRequests = convertOrtbRequestToProprietaryNative(validBidRequests);
+
+    logInfo('theadx.buildRequests', 'validBidRequests', validBidRequests, 'bidderRequest', bidderRequest);
     let results = [];
     const requestType = 'POST';
-    if (!utils.isEmpty(validBidRequests)) {
+    if (!isEmpty(validBidRequests)) {
       results = validBidRequests.map(
         bidRequest => {
+          const url = `${getRegionEndPoint(bidRequest)}?tagid=${bidRequest.params.tagId}`;
           return {
             method: requestType,
             type: requestType,
-            url: `${ENDPOINT_URL}?tagid=${bidRequest.params.tagId}`,
+            url: url,
             options: {
               withCredentials: true,
             },
             bidder: 'theadx',
-            referrer: encodeURIComponent(bidderRequest.refererInfo.referer),
+            referrer: encodeURIComponent(bidderRequest.refererInfo.page || ''),
             data: generatePayload(bidRequest, bidderRequest),
             mediaTypes: bidRequest['mediaTypes'],
             requestId: bidderRequest.bidderRequestId,
             bidId: bidRequest.bidId,
             adUnitCode: bidRequest['adUnitCode'],
+            // TODO: fix auctionId leak: https://github.com/prebid/Prebid.js/issues/9781
             auctionId: bidRequest['auctionId'],
           };
         }
@@ -179,32 +195,32 @@ export const spec = {
    * @return {Bid[]} An array of bids which were nested inside the server.
    */
   interpretResponse: (serverResponse, request) => {
-    utils.logInfo('theadx.interpretResponse', 'serverResponse', serverResponse, ' request', request);
+    logInfo('theadx.interpretResponse', 'serverResponse', serverResponse, ' request', request);
 
-    let responses = [];
+    const responses = [];
 
     if (serverResponse.body) {
-      let responseBody = serverResponse.body;
+      const responseBody = serverResponse.body;
 
-      let seatBids = responseBody.seatbid;
+      const seatBids = responseBody.seatbid;
 
-      if (!(utils.isEmpty(seatBids) ||
-          utils.isEmpty(seatBids[0].bid))) {
-        let seatBid = seatBids[0];
-        let bid = seatBid.bid[0];
+      if (!(isEmpty(seatBids) ||
+          isEmpty(seatBids[0].bid))) {
+        const seatBid = seatBids[0];
+        const bid = seatBid.bid[0];
 
         // handle any values that may end up undefined
-        let nullify = (value) => typeof value === 'undefined' ? null : parseInt(value);
+        const nullify = (value) => typeof value === 'undefined' ? null : parseInt(value);
 
         let ttl = null;
         if (bid.ext) {
           ttl = nullify(bid.ext.ttl) ? nullify(bid.ext.ttl) : 2000;
         }
 
-        let bidWidth = nullify(bid.w);
-        let bidHeight = nullify(bid.h);
+        const bidWidth = nullify(bid.w);
+        const bidHeight = nullify(bid.h);
 
-        let creative = null
+        let creative = null;
         let videoXml = null;
         let mediaType = null;
         let native = null;
@@ -250,8 +266,7 @@ export const spec = {
           });
         }
 
-        let response = {
-          bidderCode: BIDDER_CODE,
+        const response = {
           requestId: request.bidId,
           cpm: bid.price,
           width: bidWidth | 0,
@@ -259,12 +274,13 @@ export const spec = {
           ad: creative,
           ttl: ttl || 3000,
           creativeId: bid.crid,
+          dealId: bid.dealid || null,
           netRevenue: true,
           currency: responseBody.cur,
           mediaType: mediaType,
           native: native,
         };
-        if (mediaType == VIDEO && videoXml) {
+        if (mediaType === VIDEO && videoXml) {
           response.vastUrl = videoXml;
           response.videoCacheKey = bid.ext.rid;
         }
@@ -283,7 +299,7 @@ export const spec = {
    * @return {UserSync[]} The user syncs which should be dropped.
    */
   getUserSyncs: function (syncOptions, serverResponses) {
-    utils.logInfo('theadx.getUserSyncs', 'syncOptions', syncOptions, 'serverResponses', serverResponses)
+    logInfo('theadx.getUserSyncs', 'syncOptions', syncOptions, 'serverResponses', serverResponses);
     const syncs = [];
 
     if (!syncOptions.iframeEnabled && !syncOptions.pixelEnabled) {
@@ -291,8 +307,8 @@ export const spec = {
     }
 
     serverResponses.forEach(resp => {
-      const syncIframeUrls = utils.deepAccess(resp, 'body.ext.sync.iframe');
-      const syncImageUrls = utils.deepAccess(resp, 'body.ext.sync.image');
+      const syncIframeUrls = deepAccess(resp, 'body.ext.sync.iframe');
+      const syncImageUrls = deepAccess(resp, 'body.ext.sync.image');
       if (syncOptions.iframeEnabled && syncIframeUrls) {
         syncIframeUrls.forEach(syncIframeUrl => {
           syncs.push({
@@ -314,14 +330,14 @@ export const spec = {
     return syncs;
   },
 
-}
+};
 
-let buildSiteComponent = (bidRequest, bidderRequest) => {
-  let loc = parseUrl(bidderRequest.refererInfo.referer, {
+const buildSiteComponent = (bidRequest, bidderRequest) => {
+  const loc = parseUrl(bidderRequest.refererInfo.page || '', {
     decodeSearchAsString: true
   });
 
-  let site = {
+  const site = {
     domain: loc.hostname,
     page: loc.href,
     id: bidRequest.params.wid,
@@ -333,14 +349,14 @@ let buildSiteComponent = (bidRequest, bidderRequest) => {
     site.search = loc.search;
   }
   if (document) {
-    let keywords = document.getElementsByTagName('meta')['keywords'];
+    const keywords = document.getElementsByTagName('meta')['keywords'];
     if (keywords && keywords.content) {
       site.keywords = keywords.content;
     }
   }
 
   return site;
-}
+};
 
 function isMobile() {
   return (/(ios|ipod|ipad|iphone|android)/i).test(navigator.userAgent);
@@ -350,52 +366,52 @@ function isConnectedTV() {
   return (/(smart[-]?tv|hbbtv|appletv|googletv|hdmi|netcast\.tv|viera|nettv|roku|\bdtv\b|sonydtv|inettvbrowser|\btv\b)/i).test(navigator.userAgent);
 }
 
-let buildDeviceComponent = (bidRequest, bidderRequest) => {
-  let device = {
+const buildDeviceComponent = (bidRequest, bidderRequest) => {
+  const device = {
     js: 1,
     language: ('language' in navigator) ? navigator.language : null,
     ua: ('userAgent' in navigator) ? navigator.userAgent : null,
     devicetype: isMobile() ? 1 : isConnectedTV() ? 3 : 2,
-    dnt: utils.getDNT() ? 1 : 0,
+    dnt: getDNT() ? 1 : 0,
   };
   // Include connection info if available
-  const CONNECTION = navigator.connection || navigator.webkitConnection;
-  if (CONNECTION && CONNECTION.type) {
-    device['connectiontype'] = CONNECTION.type;
-    if (CONNECTION.downlinkMax) {
-      device['connectionDownlinkMax'] = CONNECTION.downlinkMax;
+  const connection = getConnectionInfo();
+  if (connection?.type) {
+    device['connectiontype'] = connection.type;
+    if (connection.downlinkMax != null) {
+      device['connectionDownlinkMax'] = connection.downlinkMax;
     }
   }
 
   return device;
 };
 
-let determineOptimalRequestId = (bidRequest, bidderRequest) => {
+const determineOptimalRequestId = (bidRequest, bidderRequest) => {
   return bidRequest.bidId;
-}
+};
 
-let extractValidSize = (bidRequest, bidderRequest) => {
+const extractValidSize = (bidRequest, bidderRequest) => {
   let width = null;
   let height = null;
 
   let requestedSizes = [];
-  let mediaTypes = bidRequest.mediaTypes;
+  const mediaTypes = bidRequest.mediaTypes;
   if (mediaTypes && ((mediaTypes.banner && mediaTypes.banner.sizes) || (mediaTypes.video && mediaTypes.video.sizes))) {
     if (mediaTypes.banner) {
       requestedSizes = mediaTypes.banner.sizes;
     } else {
       requestedSizes = mediaTypes.video.sizes;
     }
-  } else if (!utils.isEmpty(bidRequest.sizes)) {
-    requestedSizes = bidRequest.sizes
+  } else if (!isEmpty(bidRequest.sizes)) {
+    requestedSizes = bidRequest.sizes;
   }
 
   // Ensure the size array is normalized
-  let conformingSize = utils.parseSizesInput(requestedSizes);
+  const conformingSize = parseSizesInput(requestedSizes);
 
-  if (!utils.isEmpty(conformingSize) && conformingSize[0] != null) {
+  if (!isEmpty(conformingSize) && conformingSize[0] != null) {
     // Currently only the first size is utilized
-    let splitSizes = conformingSize[0].split('x');
+    const splitSizes = conformingSize[0].split('x');
 
     width = parseInt(splitSizes[0]);
     height = parseInt(splitSizes[1]);
@@ -407,26 +423,26 @@ let extractValidSize = (bidRequest, bidderRequest) => {
   };
 };
 
-let generateVideoComponent = (bidRequest, bidderRequest) => {
-  let impSize = extractValidSize(bidRequest);
+const generateVideoComponent = (bidRequest, bidderRequest) => {
+  const impSize = extractValidSize(bidRequest);
 
   return {
     w: impSize.w,
     h: impSize.h
-  }
-}
+  };
+};
 
-let generateBannerComponent = (bidRequest, bidderRequest) => {
-  let impSize = extractValidSize(bidRequest);
+const generateBannerComponent = (bidRequest, bidderRequest) => {
+  const impSize = extractValidSize(bidRequest);
 
   return {
     w: impSize.w,
     h: impSize.h
-  }
-}
+  };
+};
 
-let generateNativeComponent = (bidRequest, bidderRequest) => {
-  const assets = utils._map(bidRequest.mediaTypes.native, (bidParams, key) => {
+const generateNativeComponent = (bidRequest, bidderRequest) => {
+  const assets = _map(bidRequest.mediaTypes.native, (bidParams, key) => {
     const props = NATIVEPROBS[key];
     const asset = {
       required: bidParams.required & 1,
@@ -447,11 +463,11 @@ let generateNativeComponent = (bidRequest, bidderRequest) => {
     request: {
       assets
     }
-  }
-}
+  };
+};
 
-let generateImpBody = (bidRequest, bidderRequest) => {
-  let mediaTypes = bidRequest.mediaTypes;
+const generateImpBody = (bidRequest, bidderRequest) => {
+  const mediaTypes = bidRequest.mediaTypes;
 
   let banner = null;
   let video = null;
@@ -464,11 +480,19 @@ let generateImpBody = (bidRequest, bidderRequest) => {
   } else if (mediaTypes && mediaTypes.native) {
     native = generateNativeComponent(bidRequest, bidderRequest);
   }
-
   const result = {
     id: bidRequest.index,
     tagid: bidRequest.params.tagId + '',
   };
+
+  // deals support
+  if (bidRequest.params.deals && Array.isArray(bidRequest.params.deals) && bidRequest.params.deals.length > 0) {
+    result.pmp = {
+      deals: bidRequest.params.deals,
+      private_auction: 0,
+    };
+  }
+
   if (banner) {
     result['banner'] = banner;
   }
@@ -480,19 +504,58 @@ let generateImpBody = (bidRequest, bidderRequest) => {
   }
 
   return result;
-}
+};
+const getRegionEndPoint = (bidRequest) => {
+  if (bidRequest && bidRequest.params && bidRequest.params.region) {
+    if (bidRequest.params.region.toLowerCase() === 'tr') {
+      return ENDPOINT_TR_URL;
+    }
+  }
+  return ENDPOINT_URL;
+};
 
-let generatePayload = (bidRequest, bidderRequest) => {
+const generatePayload = (bidRequest, bidderRequest) => {
   // Generate the expected OpenRTB payload
 
-  let payload = {
+  const payload = {
     id: determineOptimalRequestId(bidRequest, bidderRequest),
     site: buildSiteComponent(bidRequest, bidderRequest),
     device: buildDeviceComponent(bidRequest, bidderRequest),
     imp: [generateImpBody(bidRequest, bidderRequest)],
   };
   // return payload;
+  const eids = getEids(bidRequest);
+  if (Object.keys(eids).length > 0) {
+    payload.ext = eids;
+  }
   return JSON.stringify(payload);
+};
+
+function getEids(bidRequest) {
+  const eids = {};
+
+  const uId2 = deepAccess(bidRequest, 'userId.uid2.id');
+  if (uId2) {
+    eids['uid2'] = uId2;
+  }
+
+  const id5 = deepAccess(bidRequest, 'userId.id5id.uid');
+  if (id5) {
+    eids['id5id'] = id5;
+    const id5Linktype = deepAccess(bidRequest, 'userId.id5id.ext.linkType');
+    if (id5Linktype) {
+      eids['id5_linktype'] = id5Linktype;
+    }
+  }
+  const netId = deepAccess(bidRequest, 'userId.netId');
+  if (netId) {
+    eids['netid'] = netId;
+  }
+  const sharedId = deepAccess(bidRequest, 'userId.sharedid.id');
+  if (sharedId) {
+    eids['sharedid'] = sharedId;
+  }
+  return eids;
 };
 
 registerBidder(spec);

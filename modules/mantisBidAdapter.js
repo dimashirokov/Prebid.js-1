@@ -1,4 +1,10 @@
-import {registerBidder} from '../src/adapters/bidderFactory';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { getStorageManager } from '../src/storageManager.js';
+import { ajax } from '../src/ajax.js';
+import { getBoundingClientRect } from '../libraries/boundingClientRect/boundingClientRect.js';
+import { getWinDimensions } from '../src/utils.js';
+
+export const storage = getStorageManager({ bidderCode: 'mantis' });
 
 function inIframe() {
   try {
@@ -7,21 +13,8 @@ function inIframe() {
     return true;
   }
 }
-function pixel(url, parent) {
-  var img = document.createElement('img');
-  img.src = url;
-  img.style.cssText = 'display:none !important;';
-  (parent || document.body).appendChild(img);
-}
-function isDesktop(ignoreTouch) {
-  var supportsTouch = !ignoreTouch && ('ontouchstart' in window || navigator.msMaxTouchPoints);
-  if (inIframe()) {
-    return !supportsTouch;
-  }
-  var width = window.innerWidth || window.document.documentElement.clientWidth || window.document.body.clientWidth;
-  return !supportsTouch && (!width || width >= (window.mantis_breakpoint || 768));
-}
-function onVisible(element, doOnVisible, time, pct) {
+
+export function onVisible(win, element, doOnVisible, time, pct) {
   var started = null;
   var notified = false;
   var onNotVisible = null;
@@ -35,7 +28,7 @@ function onVisible(element, doOnVisible, time, pct) {
   var listener;
   var doCheck = function (winWidth, winHeight, rect) {
     var hidden = typeof document.hidden !== 'undefined' && document.hidden;
-    if (rect.width == 0 || rect.height == 0 || hidden) {
+    if (rect.width === 0 || rect.height === 0 || hidden) {
       return whenNotVisible();
     }
     var minHeight = (rect.height * pct);
@@ -75,16 +68,17 @@ function onVisible(element, doOnVisible, time, pct) {
     });
   };
   if (isAmp()) {
-    listener = window.context.observeIntersection(function (changes) {
+    listener = win.context.observeIntersection(function (changes) {
       changes.forEach(function (change) {
         doCheck(change.rootBounds.width, change.rootBounds.height, change.boundingClientRect);
       });
     });
   }
   interval = setInterval(function () {
-    var winHeight = (window.innerHeight || document.documentElement.clientHeight);
-    var winWidth = (window.innerWidth || document.documentElement.clientWidth);
-    doCheck(winWidth, winHeight, element.getBoundingClientRect());
+    const windowDimensions = getWinDimensions();
+    var winHeight = (windowDimensions.innerHeight || windowDimensions.document.documentElement.clientHeight);
+    var winWidth = (windowDimensions.innerWidth || windowDimensions.document.documentElement.clientWidth);
+    doCheck(winWidth, winHeight, getBoundingClientRect(element));
   }, 100);
 }
 function storeUuid(uuid) {
@@ -92,9 +86,9 @@ function storeUuid(uuid) {
     return false;
   }
   window.mantis_uuid = uuid;
-  if (window.localStorage) {
+  if (storage.hasLocalStorage()) {
     try {
-      window.localStorage.setItem('mantis:uuid', uuid);
+      storage.setDataInLocalStorage('mantis:uuid', uuid);
     } catch (ex) {
     }
   }
@@ -102,7 +96,7 @@ function storeUuid(uuid) {
 
 function onMessage(type, callback) {
   window.addEventListener('message', function (event) {
-    if (event.data.mantis && event.data.type == type) {
+    if (event.data.mantis && event.data.type === type) {
       callback(event.data.data);
     }
   }, false);
@@ -133,9 +127,6 @@ function isArray(value) {
 }
 
 function jsonToQuery(data, chain, form) {
-  if (!data) {
-    return null;
-  }
   var parts = form || [];
   for (var key in data) {
     var queryKey = key;
@@ -149,11 +140,9 @@ function jsonToQuery(data, chain, form) {
         var aval = val[index];
         if (isObject(aval)) {
           jsonToQuery(aval, akey, parts);
-        } else if (isSendable(aval)) {
-          parts.push(akey + '=' + encodeURIComponent(aval));
         }
       }
-    } else if (isObject(val) && val != data) {
+    } else if (isObject(val) && val !== data) {
       jsonToQuery(val, queryKey, parts);
     } else if (isSendable(val)) {
       parts.push(queryKey + '=' + encodeURIComponent(val));
@@ -170,13 +159,11 @@ function buildMantisUrl(path, data, domain) {
     secure: isSecure(),
     version: 9
   };
-  if (!inIframe() || isAmp()) {
-    params.mobile = !isAmp() && isDesktop(true) ? 'false' : 'true';
-  }
+
   if (window.mantis_uuid) {
     params.uuid = window.mantis_uuid;
-  } else if (window.localStorage) {
-    var localUuid = window.localStorage.getItem('mantis:uuid');
+  } else if (storage.hasLocalStorage()) {
+    var localUuid = storage.getDataFromLocalStorage('mantis:uuid');
     if (localUuid) {
       params.uuid = localUuid;
     }
@@ -203,40 +190,48 @@ function buildMantisUrl(path, data, domain) {
       params.referrer = window.context.referrer;
     }
   }
-  Object.keys(data || {}).forEach(function (key) {
+  Object.keys(data).forEach(function (key) {
     params[key] = data[key];
   });
   var query = jsonToQuery(params);
   return (window.mantis_domain === undefined ? domain || 'https://mantodea.mantisadnetwork.com' : window.mantis_domain) + path + '?' + query;
 }
 
-const spec = {
+export const spec = {
   code: 'mantis',
-  supportedMediaTypes: ['banner', 'video', 'native'],
+  supportedMediaTypes: ['banner'],
   isBidRequestValid: function (bid) {
     return !!(bid.params.property && (bid.params.code || bid.params.zoneId || bid.params.zone));
   },
-  buildRequests: function (validBidRequests) {
+  buildRequests: function (validBidRequests, bidderRequest) {
     var property = null;
     validBidRequests.some(function (bid) {
       if (bid.params.property) {
         property = bid.params.property;
         return true;
       }
+      return false;
     });
     const query = {
       measurable: true,
+      usp: bidderRequest && bidderRequest.uspConsent,
       bids: validBidRequests.map(function (bid) {
         return {
           bidId: bid.bidId,
           config: bid.params,
           sizes: bid.sizes.map(function (size) {
-            return {width: size[0], height: size[1]};
+            return { width: size[0], height: size[1] };
           })
         };
       }),
       property: property
     };
+
+    if (bidderRequest && bidderRequest.gdprConsent && bidderRequest.gdprConsent.gdprApplies) {
+      // we purposefully do not track data for users in the EU
+      query.consent = false;
+    }
+
     return {
       method: 'GET',
       url: buildMantisUrl('/prebid/display', query) + '&foo',
@@ -252,6 +247,9 @@ const spec = {
         width: ad.width,
         height: ad.height,
         ad: ad.html,
+        meta: {
+          advertiserDomains: ad.domains || []
+        },
         ttl: ad.ttl || serverResponse.body.ttl || 86400,
         creativeId: ad.view,
         netRevenue: true,
@@ -259,45 +257,53 @@ const spec = {
       };
     });
   },
-  getUserSyncs: function (syncOptions) {
+  getUserSyncs: function (syncOptions, serverResponses, gdprConsent, uspConsent) {
     if (syncOptions.iframeEnabled) {
       return [{
         type: 'iframe',
-        url: buildMantisUrl('/prebid/iframe')
+        url: buildMantisUrl('/prebid/iframe', { gdpr: gdprConsent, uspConsent: uspConsent })
       }];
     }
     if (syncOptions.pixelEnabled) {
       return [{
         type: 'image',
-        url: buildMantisUrl('/prebid/pixel')
+        url: buildMantisUrl('/prebid/pixel', { gdpr: gdprConsent, uspConsent: uspConsent })
       }];
     }
   }
 };
-onMessage('iframe', function (data) {
-  if (window.$sf) {
-    var viewed = false;
-    $sf.ext.register(data.width, data.height, function () {
-      if ($sf.ext.inViewPercentage() < 50 || viewed) {
-        return;
-      }
-      viewed = true;
-      pixel(data.pixel);
-    });
-  } else {
-    var frames = document.getElementsByTagName('iframe');
-    for (var i = 0; i < frames.length; i++) {
-      var frame = frames[i];
-      if (frame.name == data.frame) {
-        onVisible(frame, function (stop) {
-          pixel(data.pixel);
-          stop();
-        }, 1000, 0.50);
-      }
+
+export function sfPostMessage ($sf, width, height, callback) {
+  var viewed = false;
+
+  $sf.ext.register(width, height, function () {
+    if ($sf.ext.inViewPercentage() < 50 || viewed) {
+      return;
+    }
+    viewed = true;
+    callback();
+  });
+};
+
+export function iframePostMessage (win, name, callback) {
+  var frames = document.getElementsByTagName('iframe');
+  for (var i = 0; i < frames.length; i++) {
+    var frame = frames[i];
+    if (frame.name === name) {
+      onVisible(win, frame, function (stop) {
+        callback();
+        stop();
+      }, 1000, 0.50);
     }
   }
-});
+}
 
-export { spec };
+onMessage('iframe', function (data) {
+  if (window.$sf) {
+    sfPostMessage(window.$sf, data.width, data.height, () => ajax(data.pixel));
+  } else {
+    iframePostMessage(window, data.frame, () => ajax(data.pixel));
+  }
+});
 
 registerBidder(spec);

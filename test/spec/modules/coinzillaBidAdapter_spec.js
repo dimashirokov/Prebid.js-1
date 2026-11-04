@@ -1,13 +1,11 @@
-import {assert, expect} from 'chai';
-import {spec} from 'modules/coinzillaBidAdapter';
-import {newBidder} from 'src/adapters/bidderFactory';
+import { expect } from 'chai';
+import { spec } from 'modules/coinzillaBidAdapter.js';
 
 const ENDPOINT_URL = 'https://request.czilladx.com/serve/request.php';
 
 describe('coinzillaBidAdapter', function () {
-  const adapter = newBidder(spec);
   describe('isBidRequestValid', function () {
-    let bid = {
+    const bid = {
       'bidder': 'coinzilla',
       'params': {
         placementId: 'testPlacementId'
@@ -25,7 +23,7 @@ describe('coinzillaBidAdapter', function () {
     });
   });
   describe('buildRequests', function () {
-    let bidRequests = [
+    const bidRequests = [
       {
         'bidder': 'coinzilla',
         'params': {
@@ -53,12 +51,12 @@ describe('coinzillaBidAdapter', function () {
       }
     ];
 
-    let bidderRequests = {
+    const bidderRequests = {
       'refererInfo': {
         'numIframes': 0,
         'reachedTop': true,
-        'referer': 'http://example.com',
-        'stack': ['http://example.com']
+        'referer': 'https://example.com',
+        'stack': ['https://example.com']
       }
     };
 
@@ -74,7 +72,7 @@ describe('coinzillaBidAdapter', function () {
   });
 
   describe('interpretResponse', function () {
-    let bidRequest = [
+    const bidRequest = [
       {
         'method': 'POST',
         'url': ENDPOINT_URL,
@@ -85,24 +83,24 @@ describe('coinzillaBidAdapter', function () {
           'bidId': 'bidId123',
           'referer': 'www.example.com'
         }
-
       }
     ];
-    let serverResponse = {
+    const serverResponse = {
       body: {
         'ad': '<html><h3>I am an ad</h3></html> ',
         'cpm': 4.2,
         'creativeId': '12345asdfg',
         'currency': 'EUR',
-        'statusMessage': 'Bid available',
         'requestId': 'bidId123',
         'width': 300,
         'height': 250,
-        'netRevenue': true
+        'netRevenue': true,
+        'mediaType': 'banner',
+        'advertiserDomain': ['none.com']
       }
     };
     it('should get the correct bid response', function () {
-      let expectedResponse = [{
+      const expectedResponse = [{
         'requestId': 'bidId123',
         'cpm': 4.2,
         'width': 300,
@@ -111,9 +109,11 @@ describe('coinzillaBidAdapter', function () {
         'currency': 'EUR',
         'netRevenue': true,
         'ttl': 3000,
-        'ad': '<html><h3>I am an ad</h3></html>'
+        'ad': '<html><h3>I am an ad</h3></html>',
+        'mediaType': 'banner',
+        'meta': { 'advertiserDomains': ['none.com'] }
       }];
-      let result = spec.interpretResponse(serverResponse, bidRequest[0]);
+      const result = spec.interpretResponse(serverResponse, bidRequest[0]);
       expect(Object.keys(result)).to.deep.equal(Object.keys(expectedResponse));
     });
   });

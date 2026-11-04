@@ -1,7 +1,6 @@
-import * as utils from '../src/utils';
-import * as url from '../src/url';
-import { config } from '../src/config';
-import { registerBidder } from '../src/adapters/bidderFactory';
+import { _map } from '../src/utils.js';
+import { config } from '../src/config.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
 
 const BIDDER_CODE = 'mytarget';
 const BIDDER_URL = '//ad.mail.ru/hbid_prebid/';
@@ -9,9 +8,9 @@ const DEFAULT_CURRENCY = 'RUB';
 const DEFAULT_TTL = 180;
 
 function buildPlacement(bidRequest) {
-  let { bidId, params } = bidRequest;
-  let { placementId, position, response, bidfloor } = params;
-  let placement = {
+  const { bidId, params } = bidRequest;
+  const { placementId, position, response, bidfloor } = params;
+  const placement = {
     placementId,
     id: bidId,
     position: position || 0,
@@ -29,7 +28,9 @@ function getSiteName(referrer) {
   let sitename = config.getConfig('mytarget.sitename');
 
   if (!sitename) {
-    sitename = url.parse(referrer).hostname;
+    const parsed = document.createElement('a');
+    parsed.href = decodeURIComponent(referrer);
+    sitename = parsed.hostname;
   }
 
   return sitename;
@@ -50,11 +51,11 @@ export const spec = {
     let referrer = '';
 
     if (bidderRequest && bidderRequest.refererInfo) {
-      referrer = bidderRequest.refererInfo.referer;
+      referrer = bidderRequest.refererInfo.page;
     }
 
     const payload = {
-      places: utils._map(validBidRequests, buildPlacement),
+      places: _map(validBidRequests, buildPlacement),
       site: {
         sitename: getSiteName(referrer),
         page: referrer
@@ -76,11 +77,11 @@ export const spec = {
   },
 
   interpretResponse: function(serverResponse, bidRequest) {
-    let { body } = serverResponse;
+    const { body } = serverResponse;
 
     if (body.bids) {
-      return utils._map(body.bids, (bid) => {
-        let bidResponse = {
+      return _map(body.bids, (bid) => {
+        const bidResponse = {
           requestId: bid.id,
           cpm: bid.price,
           width: bid.size.width,
@@ -88,8 +89,11 @@ export const spec = {
           ttl: bid.ttl || DEFAULT_TTL,
           currency: bid.currency || DEFAULT_CURRENCY,
           creativeId: bid.creativeId || generateRandomId(),
-          netRevenue: true
-        }
+          netRevenue: true,
+          meta: {
+            advertiserDomains: bid.adomain && bid.adomain.length > 0 ? bid.adomain : [],
+          }
+        };
 
         if (bid.adm) {
           bidResponse.ad = bid.adm;
@@ -103,6 +107,6 @@ export const spec = {
 
     return [];
   }
-}
+};
 
 registerBidder(spec);

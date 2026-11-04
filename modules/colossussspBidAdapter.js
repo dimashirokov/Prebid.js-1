@@ -1,27 +1,85 @@
-import { registerBidder } from '../src/adapters/bidderFactory';
-import { BANNER, NATIVE, VIDEO } from '../src/mediaTypes';
-import * as utils from '../src/utils';
+import { deepAccess } from '../src/utils.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER, NATIVE, VIDEO } from '../src/mediaTypes.js';
+import { ajax } from '../src/ajax.js';
+import { convertOrtbRequestToProprietaryNative } from '../src/native.js';
+import {
+  buildPlacementProcessingFunction,
+  buildRequestsBase,
+  interpretResponse,
+  getUserSyncs
+} from '../libraries/teqblazeUtils/bidderUtils.js';
+
+/**
+ * @typedef {import('../src/adapters/bidderFactory.js').BidRequest} BidRequest
+ * @typedef {import('../src/adapters/bidderFactory.js').Bid} Bid
+ */
 
 const BIDDER_CODE = 'colossusssp';
-const URL = '//colossusssp.com/?c=o&m=multi';
-const URL_SYNC = '//colossusssp.com/?c=o&m=cookie';
+const G_URL = 'https://colossusssp.com/?c=o&m=multi';
+const G_URL_SYNC = 'https://sync.colossusssp.com';
 
-function isBidResponseValid(bid) {
-  if (!bid.requestId || !bid.cpm || !bid.creativeId || !bid.ttl || !bid.currency) {
-    return false;
-  }
-
-  switch (bid.mediaType) {
-    case BANNER:
-      return Boolean(bid.width && bid.height && bid.ad);
-    case VIDEO:
-      return Boolean(bid.vastUrl);
-    case NATIVE:
-      return Boolean(bid.native);
-    default:
-      return false;
+function getUserId(eids, id, source, uidExt) {
+  if (id) {
+    var uid = { id };
+    if (uidExt) {
+      uid.ext = uidExt;
+    }
+    eids.push({
+      source,
+      uids: [uid]
+    });
   }
 }
+
+const addPlacementType = (bid, bidderRequest, placement) => {
+  placement.placementId = bid.params.placement_id;
+  placement.groupId = bid.params.group_id;
+};
+
+const addCustomFieldsToPlacement = (bid, bidderRequest, placement) => {
+  placement.traffic = placement.adFormat;
+  delete placement.adFormat;
+
+  if (placement.traffic === VIDEO) {
+    placement.sizes = placement.playerSize;
+  }
+
+  placement.tid = bid.ortb2Imp?.ext?.tid;
+
+  const gpid = deepAccess(bid, 'ortb2Imp.ext.gpid') || deepAccess(bid, 'ortb2Imp.ext.data.pbadslot');
+  if (gpid) {
+    placement.gpid = gpid;
+  }
+
+  placement.eids = placement.eids || [];
+  if (bid.userId) {
+    getUserId(placement.eids, bid.userId.idl_env, 'identityLink');
+    getUserId(placement.eids, bid.userId.id5id, 'id5-sync.com');
+    getUserId(placement.eids, bid.userId.uid2 && bid.userId.uid2.id, 'uidapi.com');
+    getUserId(placement.eids, bid.userId.tdid, 'adserver.org', { rtiPartner: 'TDID' });
+  }
+
+  placement.floor = {};
+  if (typeof bid.getFloor === 'function' && placement.sizes) {
+    for (let size of placement.sizes) {
+      const tmpFloor = bid.getFloor({ currency: 'USD', mediaType: placement.traffic, size });
+      if (tmpFloor) {
+        placement.floor[`${size[0]}x${size[1]}`] = tmpFloor.floor;
+      }
+    }
+  }
+
+  delete placement.bidfloor;
+  delete placement.floors;
+  delete placement.plcmt;
+  delete placement.ext;
+};
+
+const placementProcessingFunction = buildPlacementProcessingFunction({
+  addPlacementType,
+  addCustomFieldsToPlacement
+});
 
 export const spec = {
   code: BIDDER_CODE,
@@ -33,7 +91,10 @@ export const spec = {
    * @return boolean True if this is a valid bid, and false otherwise.
    */
   isBidRequestValid: (bid) => {
-    return Boolean(bid.bidId && bid.params && !isNaN(bid.params.placement_id));
+    const validPlacamentId = bid.params && !isNaN(bid.params.placement_id);
+    const validGroupId = bid.params && !isNaN(bid.params.group_id);
+
+    return Boolean(bid.bidId && (validPlacamentId || validGroupId));
   },
 
   /**
@@ -42,40 +103,44 @@ export const spec = {
    * @param {BidRequest[]} validBidRequests A non-empty list of valid bid requests that should be sent to the Server.
    * @return ServerRequest Info describing the request to the server.
    */
-  buildRequests: (validBidRequests) => {
-    let winTop = window;
-    try {
-      window.top.location.toString();
-      winTop = window.top;
-    } catch (e) {
-      utils.logMessage(e);
+  buildRequests: (validBidRequests = [], bidderRequest = {}) => {
+    validBidRequests = convertOrtbRequestToProprietaryNative(validBidRequests);
+
+    const request = buildRequestsBase({
+      adUrl: G_URL,
+      validBidRequests,
+      bidderRequest,
+      placementProcessingFunction
+    });
+
+    const base = request.data;
+    const firstPartyData = bidderRequest.ortb2 || {};
+
+    request.data = {
+      deviceWidth: base.deviceWidth,
+      deviceHeight: base.deviceHeight,
+      language: base.language,
+      secure: base.secure,
+      host: base.host,
+      page: base.page,
+      placements: base.placements,
+      ccpa: base.ccpa,
+      userObj: firstPartyData.user,
+      siteObj: firstPartyData.site,
+      appObj: firstPartyData.app
     };
-    let location = utils.getTopWindowLocation();
-    let placements = [];
-    let request = {
-      'deviceWidth': winTop.screen.width,
-      'deviceHeight': winTop.screen.height,
-      'language': (navigator && navigator.language) ? navigator.language : '',
-      'secure': location.protocol === 'https:' ? 1 : 0,
-      'host': location.host,
-      'page': location.pathname,
-      'placements': placements
-    };
-    for (let i = 0; i < validBidRequests.length; i++) {
-      let bid = validBidRequests[i];
-      let placement = {
-        placementId: bid.params.placement_id,
-        bidId: bid.bidId,
-        sizes: bid.sizes,
-        traffic: bid.params.traffic || BANNER
-      };
-      placements.push(placement);
+
+    if (bidderRequest.gdprConsent) {
+      request.data.gdpr_consent = bidderRequest.gdprConsent.consentString || 'ALL';
+      request.data.gdpr_require = bidderRequest.gdprConsent.gdprApplies ? 1 : 0;
     }
-    return {
-      method: 'POST',
-      url: URL,
-      data: request
-    };
+
+    if (base.gpp) {
+      request.data.gpp = base.gpp;
+      request.data.gpp_sid = base.gpp_sid;
+    }
+
+    return request;
   },
 
   /**
@@ -84,27 +149,13 @@ export const spec = {
    * @param {*} serverResponse A successful response from the server.
    * @return {Bid[]} An array of bids which were nested inside the server.
    */
-  interpretResponse: (serverResponse) => {
-    let response = [];
-    try {
-      serverResponse = serverResponse.body;
-      for (let i = 0; i < serverResponse.length; i++) {
-        let resItem = serverResponse[i];
-        if (isBidResponseValid(resItem)) {
-          response.push(resItem);
-        }
-      }
-    } catch (e) {
-      utils.logMessage(e);
-    };
-    return response;
-  },
+  interpretResponse,
+  getUserSyncs: getUserSyncs(G_URL_SYNC),
 
-  getUserSyncs: () => {
-    return [{
-      type: 'image',
-      url: URL_SYNC
-    }];
+  onBidWon: (bid) => {
+    if (bid.nurl) {
+      ajax(bid.nurl, null);
+    }
   }
 };
 

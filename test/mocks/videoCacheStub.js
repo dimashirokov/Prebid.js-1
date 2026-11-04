@@ -1,4 +1,4 @@
-import * as videoCache from 'src/videoCache';
+import { _internal as videoCache } from 'src/videoCache.js';
 
 /**
  * Function which can be called from unit tests to stub out the video cache.
@@ -30,5 +30,5 @@ export default function useVideoCacheStub(responses) {
     return {
       store: storeStub
     };
-  }
+  };
 }

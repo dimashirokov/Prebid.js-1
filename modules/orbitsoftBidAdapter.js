@@ -1,9 +1,9 @@
-import * as utils from '../src/utils';
-import {registerBidder} from '../src/adapters/bidderFactory';
-import {config} from '../src/config';
+import * as utils from '../src/utils.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { getBidIdParameter } from '../src/utils.js';
 
 const BIDDER_CODE = 'orbitsoft';
-let styleParamsMap = {
+const styleParamsMap = {
   'title.family': 'f1', // headerFont
   'title.size': 'fs1', // headerFontSize
   'title.weight': 'w1', // headerWeight
@@ -25,7 +25,7 @@ let styleParamsMap = {
 };
 export const spec = {
   code: BIDDER_CODE,
-  aliases: ['oas', 'mediafuseLift'], // short code and customer aliases
+  aliases: ['oas', '152media', 'paradocs'], // short code and customer aliases
   isBidRequestValid: function (bid) {
     switch (true) {
       case !('params' in bid):
@@ -42,32 +42,31 @@ export const spec = {
   },
   buildRequests: function (validBidRequests) {
     let bidRequest;
-    let serverRequests = [];
+    const serverRequests = [];
     for (let i = 0; i < validBidRequests.length; i++) {
       bidRequest = validBidRequests[i];
-      let bidRequestParams = bidRequest.params;
-      let callbackId = utils.getUniqueIdentifierStr();
-      let placementId = utils.getBidIdParameter('placementId', bidRequestParams);
-      let requestUrl = utils.getBidIdParameter('requestUrl', bidRequestParams);
-      let referrer = utils.getBidIdParameter('ref', bidRequestParams);
-      let location = utils.getBidIdParameter('loc', bidRequestParams);
+      const bidRequestParams = bidRequest.params;
+      const placementId = getBidIdParameter('placementId', bidRequestParams);
+      const requestUrl = getBidIdParameter('requestUrl', bidRequestParams);
+      let referrer = getBidIdParameter('ref', bidRequestParams);
+      let location = getBidIdParameter('loc', bidRequestParams);
       // Append location & referrer
       if (location === '') {
-        location = utils.getTopWindowUrl();
+        location = utils.getWindowLocation();
       }
-      if (referrer === '') {
-        referrer = utils.getTopWindowReferrer();
+      if (referrer === '' && bidRequest && bidRequest.refererInfo) {
+        referrer = bidRequest.refererInfo.referer;
       }
 
       // Styles params
-      let stylesParams = utils.getBidIdParameter('style', bidRequestParams);
-      let stylesParamsArray = {};
-      for (let currentValue in stylesParams) {
+      const stylesParams = getBidIdParameter('style', bidRequestParams);
+      const stylesParamsArray = {};
+      for (const currentValue in stylesParams) {
         if (stylesParams.hasOwnProperty(currentValue)) {
-          let currentStyle = stylesParams[currentValue];
-          for (let field in currentStyle) {
+          const currentStyle = stylesParams[currentValue];
+          for (const field in currentStyle) {
             if (currentStyle.hasOwnProperty(field)) {
-              let styleField = styleParamsMap[currentValue + '.' + field];
+              const styleField = styleParamsMap[currentValue + '.' + field];
               if (typeof styleField !== 'undefined') {
                 stylesParamsArray[styleField] = currentStyle[field];
               }
@@ -76,36 +75,37 @@ export const spec = {
         }
       }
       // Custom params
-      let customParams = utils.getBidIdParameter('customParams', bidRequestParams);
-      let customParamsArray = {};
-      for (let customField in customParams) {
+      const customParams = getBidIdParameter('customParams', bidRequestParams);
+      const customParamsArray = {};
+      for (const customField in customParams) {
         if (customParams.hasOwnProperty(customField)) {
           customParamsArray['c.' + customField] = customParams[customField];
         }
       }
 
       // Sizes params (not supports by server, for future features)
-      let sizesParams = bidRequest.sizes;
-      let parsedSizes = utils.parseSizesInput(sizesParams);
+      const sizesParams = bidRequest.sizes;
+      const parsedSizes = utils.parseSizesInput(sizesParams);
+      const requestData = Object.assign({
+        'scid': placementId,
+        'callback_uid': utils.generateUUID(),
+        'loc': location,
+        'ref': referrer,
+        'size': parsedSizes
+      }, stylesParamsArray, customParamsArray);
 
       serverRequests.push({
-        method: 'GET',
+        method: 'POST',
         url: requestUrl,
-        data: Object.assign({
-          'scid': placementId,
-          'callback_uid': callbackId,
-          'loc': location,
-          'ref': referrer,
-          'size': parsedSizes
-        }, stylesParamsArray, customParamsArray),
-        options: {withCredentials: false},
+        data: requestData,
+        options: { withCredentials: false },
         bidRequest: bidRequest
       });
     }
     return serverRequests;
   },
   interpretResponse: function (serverResponse, request) {
-    let bidResponses = [];
+    const bidResponses = [];
     if (!serverResponse || serverResponse.error) {
       utils.logError(BIDDER_CODE + ': Server response error');
       return bidResponses;
@@ -122,11 +122,11 @@ export const spec = {
     const HEIGHT = serverBody.height;
     const CREATIVE = serverBody.content_url;
     const CALLBACK_UID = serverBody.callback_uid;
-    const TIME_TO_LIVE = config.getConfig('_bidderTimeout');
-    const REFERER = utils.getTopWindowUrl();
-    let bidRequest = request.bidRequest;
+    const TIME_TO_LIVE = 60;
+    const REFERER = utils.getWindowTop();
+    const bidRequest = request.bidRequest;
     if (CPM > 0 && WIDTH > 0 && HEIGHT > 0) {
-      let bidResponse = {
+      const bidResponse = {
         requestId: bidRequest.bidId,
         cpm: CPM,
         width: WIDTH,
@@ -136,7 +136,10 @@ export const spec = {
         referrer: REFERER,
         currency: 'USD',
         netRevenue: true,
-        adUrl: CREATIVE
+        adUrl: CREATIVE,
+        meta: {
+          advertiserDomains: serverBody.adomain ? serverBody.adomain : []
+        }
       };
       bidResponses.push(bidResponse);
     }

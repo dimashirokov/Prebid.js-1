@@ -1,21 +1,25 @@
-import fntzAnalyticsAdapter from 'modules/fintezaAnalyticsAdapter';
-import includes from 'core-js/library/fn/array/includes';
+import fntzAnalyticsAdapter from 'modules/fintezaAnalyticsAdapter.js';
 import { expect } from 'chai';
-import { parse as parseURL } from 'src/url';
-let adapterManager = require('src/adapterManager').default;
-let events = require('src/events');
-let constants = require('src/constants.json');
+import { parseUrl } from 'src/utils.js';
+import { server } from 'test/mocks/xhr.js';
+import { EVENTS } from 'src/constants.js';
+
+const adapterManager = require('src/adapterManager').default;
+const events = require('src/events');
+
+function setCookie(name, value, expires) {
+  document.cookie = name + '=' + value +
+    '; path=/' +
+    (expires ? ('; expires=' + expires.toUTCString()) : '') +
+    '; SameSite=Lax';
+}
 
 describe('finteza analytics adapter', function () {
   const clientId = 'fntz-client-32145';
-
-  let xhr;
-  let requests;
+  const uniqCookie = '5045380421580287382';
 
   beforeEach(function () {
-    xhr = sinon.useFakeXMLHttpRequest();
-    requests = [];
-    xhr.onCreate = request => { requests.push(request) };
+    setCookie('_fz_uniq', uniqCookie);
     sinon.stub(events, 'getEvents').returns([]);
     sinon.spy(fntzAnalyticsAdapter, 'track');
 
@@ -38,7 +42,7 @@ describe('finteza analytics adapter', function () {
   });
 
   afterEach(function () {
-    xhr.restore();
+    setCookie('_fz_uniq', '', new Date(0));
     events.getEvents.restore();
     fntzAnalyticsAdapter.track.restore();
     fntzAnalyticsAdapter.disableAnalytics();
@@ -46,7 +50,7 @@ describe('finteza analytics adapter', function () {
 
   describe('track', () => {
     describe('bid request', () => {
-      it('builds and sends data', function () {
+      it('builds and sends request data', function () {
         const bidderCode = 'Bidder789';
         const pauctionId = '5018eb39-f900-4370-b71e-3bb5b48d324f';
 
@@ -69,26 +73,30 @@ describe('finteza analytics adapter', function () {
         };
 
         // Emit the events with the "real" arguments
-        events.emit(constants.EVENTS.BID_REQUESTED, bidRequest);
+        events.emit(EVENTS.BID_REQUESTED, bidRequest);
 
-        expect(requests.length).to.equal(1);
+        const reqs = server.requests.filter(req => req.url.startsWith('https://content.mql5.com'));
+        expect(reqs.length).to.eql(1);
 
-        expect(requests[0].method).to.equal('GET');
+        expect(reqs[0].method).to.equal('GET');
+        expect(reqs[0].withCredentials).to.equal(true);
 
-        const url = parseURL(requests[0].url);
+        const url = parseUrl(reqs[0].url);
 
         expect(url.protocol).to.equal('https');
         expect(url.hostname).to.equal('content.mql5.com');
         expect(url.pathname).to.equal('/tr');
         expect(url.search.id).to.equal(clientId);
+        expect(url.search.fz_uniq).to.equal(uniqCookie);
         expect(decodeURIComponent(url.search.event)).to.equal(`Bid Request ${bidderCode.toUpperCase()}`);
-
-        sinon.assert.callCount(fntzAnalyticsAdapter.track, 1);
+        sinon.assert.calledWith(fntzAnalyticsAdapter.track, sinon.match({
+          eventType: EVENTS.BID_REQUESTED
+        }));
       });
     });
 
     describe('bid response', () => {
-      it('builds and sends data', function () {
+      it('builds and sends response data', function () {
         const bidderCode = 'Bidder789';
         const pauctionId = '5018eb39-f900-4370-b71e-3bb5b48d324f';
 
@@ -110,40 +118,45 @@ describe('finteza analytics adapter', function () {
         };
 
         // Emit the events with the "real" arguments
-        events.emit(constants.EVENTS.BID_RESPONSE, bidResponse);
+        events.emit(EVENTS.BID_RESPONSE, bidResponse);
+        const reqs = server.requests.filter(req => req.url.startsWith('https://content.mql5.com'));
+        expect(reqs.length).to.equal(2);
+        expect(reqs[0].method).to.equal('GET');
+        expect(reqs[0].withCredentials).to.equal(true);
 
-        expect(requests.length).to.equal(2);
-
-        expect(requests[0].method).to.equal('GET');
-
-        let url = parseURL(requests[0].url);
+        let url = parseUrl(reqs[0].url);
 
         expect(url.protocol).to.equal('https');
         expect(url.hostname).to.equal('content.mql5.com');
         expect(url.pathname).to.equal('/tr');
         expect(url.search.id).to.equal(clientId);
+        expect(url.search.fz_uniq).to.equal(uniqCookie);
         expect(decodeURIComponent(url.search.event)).to.equal(`Bid Response Price ${bidderCode.toLowerCase()}`);
         expect(url.search.value).to.equal(String(cpm));
         expect(url.search.unit).to.equal('usd');
 
-        expect(requests[1].method).to.equal('GET');
+        expect(reqs[1].method).to.equal('GET');
+        expect(reqs[1].withCredentials).to.equal(true);
 
-        url = parseURL(requests[1].url);
+        url = parseUrl(reqs[1].url);
 
         expect(url.protocol).to.equal('https');
         expect(url.hostname).to.equal('content.mql5.com');
         expect(url.pathname).to.equal('/tr');
         expect(url.search.id).to.equal(clientId);
+        expect(url.search.fz_uniq).to.equal(uniqCookie);
         expect(decodeURIComponent(url.search.event)).to.equal(`Bid Response Time ${bidderCode.toLowerCase()}`);
         expect(url.search.value).to.equal(String(timeToRespond));
         expect(url.search.unit).to.equal('ms');
 
-        sinon.assert.callCount(fntzAnalyticsAdapter.track, 1);
+        sinon.assert.calledWith(fntzAnalyticsAdapter.track, sinon.match({
+          eventType: EVENTS.BID_RESPONSE
+        }));
       });
     });
 
     describe('bid won', () => {
-      it('builds and sends data', function () {
+      it('builds and sends bid won data', function () {
         const bidderCode = 'Bidder789';
         const pauctionId = '5018eb39-f900-4370-b71e-3bb5b48d324f';
 
@@ -157,31 +170,34 @@ describe('finteza analytics adapter', function () {
           auctionId: pauctionId,
           width: 300,
           height: 250
-        }
+        };
 
         // Emit the events with the "real" arguments
-        events.emit(constants.EVENTS.BID_WON, bidWon);
+        events.emit(EVENTS.BID_WON, bidWon);
 
-        expect(requests.length).to.equal(1);
+        const reqs = server.requests.filter((req) => req.url.startsWith('https://content.mql5.com'));
+        expect(reqs[0].method).to.equal('GET');
+        expect(reqs[0].withCredentials).to.equal(true);
 
-        expect(requests[0].method).to.equal('GET');
+        expect(reqs.length).to.equal(1);
 
-        const url = parseURL(requests[0].url);
+        const url = parseUrl(reqs[0].url);
 
         expect(url.protocol).to.equal('https');
         expect(url.hostname).to.equal('content.mql5.com');
         expect(url.pathname).to.equal('/tr');
         expect(url.search.id).to.equal(clientId);
+        expect(url.search.fz_uniq).to.equal(uniqCookie);
         expect(decodeURIComponent(url.search.event)).to.equal(`Bid Won ${bidderCode.toUpperCase()}`);
         expect(url.search.value).to.equal(String(cpm));
         expect(url.search.unit).to.equal('usd');
 
-        sinon.assert.callCount(fntzAnalyticsAdapter.track, 1);
+        sinon.assert.calledWith(fntzAnalyticsAdapter.track, sinon.match({ eventType: EVENTS.BID_WON }));
       });
     });
 
     describe('bid timeout', () => {
-      it('builds and sends data', function () {
+      it('builds and sends timeout data', function () {
         const bidderCode = 'biDDer789';
         const pauctionId = '5018eb39-f900-4370-b71e-3bb5b48d324f';
 
@@ -197,18 +213,20 @@ describe('finteza analytics adapter', function () {
         ];
 
         // Emit the events with the "real" arguments
-        events.emit(constants.EVENTS.BID_TIMEOUT, bidTimeout);
+        events.emit(EVENTS.BID_TIMEOUT, bidTimeout);
 
-        expect(requests.length).to.equal(1);
+        expect(server.requests[0].method).to.equal('GET');
+        expect(server.requests[0].withCredentials).to.equal(true);
 
-        expect(requests[0].method).to.equal('GET');
+        expect(server.requests.length).to.equal(1);
 
-        const url = parseURL(requests[0].url);
+        const url = parseUrl(server.requests[0].url);
 
         expect(url.protocol).to.equal('https');
         expect(url.hostname).to.equal('content.mql5.com');
         expect(url.pathname).to.equal('/tr');
         expect(url.search.id).to.equal(clientId);
+        expect(url.search.fz_uniq).to.equal(uniqCookie);
         expect(decodeURIComponent(url.search.event)).to.equal(`Bid Timeout Bidder789`);
         expect(url.search.value).to.equal(String(timeout));
         expect(url.search.unit).to.equal('ms');

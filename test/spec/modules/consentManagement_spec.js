@@ -1,484 +1,349 @@
-import {setConsentConfig, requestBidsHook, resetConsentData, userCMP, consentTimeout, allowAuction, staticConsentData} from 'modules/consentManagement';
-import {gdprDataHandler} from 'src/adapterManager';
-import * as utils from 'src/utils';
-import { config } from 'src/config';
+import { consentConfig, gdprScope, resetConsentData, setConsentConfig, tcfCmpEventManager } from 'modules/consentManagementTcf.js';
+import { gdprDataHandler } from 'src/adapterManager.js';
+import * as utils from 'src/utils.js';
+import { config } from 'src/config.js';
+import pbjs from 'src/prebid.js';
 
-let assert = require('chai').assert;
-let expect = require('chai').expect;
+const expect = require('chai').expect;
 
 describe('consentManagement', function () {
+  function mockCMP(cmpResponse) {
+    return function(...args) {
+      args[2](Object.assign({ eventStatus: 'tcloaded' }, cmpResponse), true);
+    };
+  }
+
   describe('setConsentConfig tests:', function () {
     describe('empty setConsentConfig value', function () {
       beforeEach(function () {
         sinon.stub(utils, 'logInfo');
+        sinon.stub(utils, 'logWarn');
       });
 
       afterEach(function () {
         utils.logInfo.restore();
+        utils.logWarn.restore();
         config.resetConfig();
+        resetConsentData();
       });
 
-      it('should use system default values', function () {
-        setConsentConfig({});
-        expect(userCMP).to.be.equal('iab');
-        expect(consentTimeout).to.be.equal(10000);
-        expect(allowAuction).to.be.true;
-        sinon.assert.callCount(utils.logInfo, 4);
+      it('should use system default values', async function () {
+        await setConsentConfig({});
+        expect(consentConfig.cmpHandler).to.be.equal('iab');
+        expect(consentConfig.cmpTimeout).to.be.equal(10000);
+        expect(gdprScope).to.be.equal(false);
+      });
+
+      it('should exit consent manager if config is not an object', async function () {
+        await setConsentConfig('');
+        expect(consentConfig.cmpHandler).to.be.undefined;
+        sinon.assert.calledOnce(utils.logWarn);
+      });
+
+      it('should exit consent manager if gdpr not set with new config structure', async function () {
+        await setConsentConfig({ usp: { cmpApi: 'iab', timeout: 50 } });
+        expect(consentConfig.cmpHandler).to.be.undefined;
+        sinon.assert.calledOnce(utils.logWarn);
+      });
+
+      it('should exit consentManagement module if config is "undefined"', async function () {
+        await setConsentConfig(undefined);
+        expect(consentConfig.cmpHandler).to.be.undefined;
+        sinon.assert.calledOnce(utils.logWarn);
+      });
+
+      it('should not produce any consent metadata', async function () {
+        await setConsentConfig(undefined);
+        const consentMetadata = gdprDataHandler.getConsentMeta();
+        expect(consentMetadata).to.be.undefined;
+        sinon.assert.calledOnce(utils.logWarn);
+      });
+
+      it('should immediately look up consent data', async () => {
+        await setConsentConfig({ gdpr: { cmpApi: 'invalid' } });
+        expect(gdprDataHandler.ready).to.be.true;
       });
     });
 
     describe('valid setConsentConfig value', function () {
       afterEach(function () {
         config.resetConfig();
-        $$PREBID_GLOBAL$$.requestBids.removeAll();
       });
-      it('results in all user settings overriding system defaults', function () {
-        let allConfig = {
+
+      it('results in all user settings overriding system defaults', async function () {
+        const allConfig = {
           cmpApi: 'iab',
           timeout: 7500,
-          allowAuctionWithoutConsent: false
+          defaultGdprScope: true
         };
 
-        setConsentConfig(allConfig);
-        expect(userCMP).to.be.equal('iab');
-        expect(consentTimeout).to.be.equal(7500);
-        expect(allowAuction).to.be.false;
+        await setConsentConfig(allConfig);
+        expect(consentConfig.cmpHandler).to.be.equal('iab');
+        expect(consentConfig.cmpTimeout).to.be.equal(7500);
+        expect(gdprScope).to.be.true;
+      });
+
+      it('should use new consent manager config structure for gdpr', async function () {
+        await setConsentConfig({
+          gdpr: { cmpApi: 'daa', timeout: 8700 }
+        });
+
+        expect(consentConfig.cmpHandler).to.be.equal('daa');
+        expect(consentConfig.cmpTimeout).to.be.equal(8700);
+      });
+
+      it('should ignore config.usp and use config.gdpr, with default cmpApi', async function () {
+        await setConsentConfig({
+          gdpr: { timeout: 5000 },
+          usp: { cmpApi: 'daa', timeout: 50 }
+        });
+
+        expect(consentConfig.cmpHandler).to.be.equal('iab');
+        expect(consentConfig.cmpTimeout).to.be.equal(5000);
+      });
+
+      it('should ignore config.usp and use config.gdpr, with default cmpApi and timeout', async function () {
+        await setConsentConfig({
+          gdpr: {},
+          usp: { cmpApi: 'daa', timeout: 50 }
+        });
+
+        expect(consentConfig.cmpHandler).to.be.equal('iab');
+        expect(consentConfig.cmpTimeout).to.be.equal(10000);
+      });
+
+      it('should recognize config.gdpr, with default cmpApi and timeout', async function () {
+        await setConsentConfig({
+          gdpr: {}
+        });
+
+        expect(consentConfig.cmpHandler).to.be.equal('iab');
+        expect(consentConfig.cmpTimeout).to.be.equal(10000);
+      });
+
+      it('should fallback to old consent manager config object if no config.gdpr', async function () {
+        await setConsentConfig({
+          cmpApi: 'iab',
+          timeout: 3333,
+          gdpr: false
+        });
+
+        expect(consentConfig.cmpHandler).to.be.equal('iab');
+        expect(consentConfig.cmpTimeout).to.be.equal(3333);
+        expect(gdprScope).to.be.equal(false);
+      });
+
+      it('should enable gdprDataHandler', async () => {
+        await setConsentConfig({ gdpr: {} });
+        expect(gdprDataHandler.enabled).to.be.true;
       });
     });
 
     describe('static consent string setConsentConfig value', () => {
-      afterEach(() => {
-        config.resetConfig();
-        $$PREBID_GLOBAL$$.requestBids.removeAll();
-      });
-      it('results in user settings overriding system defaults', () => {
-        let staticConfig = {
-          cmpApi: 'static',
-          timeout: 7500,
-          allowAuctionWithoutConsent: false,
-          consentData: {
-            getConsentData: {
-              'gdprApplies': true,
-              'hasGlobalScope': false,
-              'consentData': 'BOOgjO9OOgjO9APABAENAi-AAAAWd7_______9____7_9uz_Gv_r_ff_3nW0739P1A_r_Oz_rm_-zzV44_lpQQRCEA'
-            },
-            getVendorConsents: {
-              'metadata': 'BOOgjO9OOgjO9APABAENAi-AAAAWd7_______9____7_9uz_Gv_r_ff_3nW0739P1A_r_Oz_rm_-zzV44_lpQQRCEA',
-              'gdprApplies': true,
-              'hasGlobalScope': false,
-              'isEU': true,
-              'cookieVersion': 1,
-              'created': '2018-05-29T07:45:48.522Z',
-              'lastUpdated': '2018-05-29T07:45:48.522Z',
-              'cmpId': 15,
-              'cmpVersion': 1,
-              'consentLanguage': 'EN',
-              'vendorListVersion': 34,
-              'maxVendorId': 359,
-              'purposeConsents': {
-                '1': true,
-                '2': true,
-                '3': true,
-                '4': true,
-                '5': true
-              },
-              'vendorConsents': {
-                '1': true,
-                '2': true,
-                '3': true,
-                '4': true,
-                '5': false,
-                '6': true,
-                '7': true,
-                '8': true,
-                '9': true,
-                '10': true,
-                '11': true,
-                '12': true,
-                '13': true,
-                '14': true,
-                '15': true,
-                '16': true,
-                '17': true,
-                '18': true,
-                '19': true,
-                '20': true,
-                '21': true,
-                '22': true,
-                '23': true,
-                '24': true,
-                '25': true,
-                '26': true,
-                '27': true,
-                '28': true,
-                '29': true,
-                '30': true,
-                '31': true,
-                '32': true,
-                '33': true,
-                '34': true,
-                '35': true,
-                '36': true,
-                '37': true,
-                '38': true,
-                '39': true,
-                '40': true,
-                '41': true,
-                '42': true,
-                '43': true,
-                '44': true,
-                '45': true,
-                '46': true,
-                '47': true,
-                '48': true,
-                '49': true,
-                '50': true,
-                '51': true,
-                '52': true,
-                '53': true,
-                '54': false,
-                '55': true,
-                '56': true,
-                '57': true,
-                '58': true,
-                '59': true,
-                '60': true,
-                '61': true,
-                '62': true,
-                '63': true,
-                '64': true,
-                '65': true,
-                '66': true,
-                '67': true,
-                '68': true,
-                '69': true,
-                '70': true,
-                '71': true,
-                '72': true,
-                '73': true,
-                '74': true,
-                '75': true,
-                '76': true,
-                '77': true,
-                '78': true,
-                '79': true,
-                '80': true,
-                '81': true,
-                '82': true,
-                '83': false,
-                '84': true,
-                '85': true,
-                '86': true,
-                '87': true,
-                '88': true,
-                '89': true,
-                '90': true,
-                '91': true,
-                '92': true,
-                '93': true,
-                '94': true,
-                '95': true,
-                '96': false,
-                '97': true,
-                '98': true,
-                '99': false,
-                '100': true,
-                '101': true,
-                '102': true,
-                '103': false,
-                '104': true,
-                '105': true,
-                '106': false,
-                '107': false,
-                '108': true,
-                '109': true,
-                '110': true,
-                '111': true,
-                '112': true,
-                '113': true,
-                '114': true,
-                '115': true,
-                '116': false,
-                '117': false,
-                '118': false,
-                '119': true,
-                '120': true,
-                '121': false,
-                '122': true,
-                '123': false,
-                '124': true,
-                '125': true,
-                '126': true,
-                '127': true,
-                '128': true,
-                '129': true,
-                '130': true,
-                '131': true,
-                '132': true,
-                '133': true,
-                '134': true,
-                '135': false,
-                '136': true,
-                '137': false,
-                '138': true,
-                '139': true,
-                '140': true,
-                '141': true,
-                '142': true,
-                '143': true,
-                '144': true,
-                '145': true,
-                '146': false,
-                '147': true,
-                '148': true,
-                '149': true,
-                '150': true,
-                '151': true,
-                '152': false,
-                '153': true,
-                '154': true,
-                '155': true,
-                '156': true,
-                '157': true,
-                '158': true,
-                '159': true,
-                '160': true,
-                '161': true,
-                '162': true,
-                '163': true,
-                '164': true,
-                '165': true,
-                '166': false,
-                '167': true,
-                '168': true,
-                '169': true,
-                '170': true,
-                '171': false,
-                '172': false,
-                '173': true,
-                '174': true,
-                '175': true,
-                '176': false,
-                '177': true,
-                '178': false,
-                '179': true,
-                '180': true,
-                '181': false,
-                '182': true,
-                '183': true,
-                '184': false,
-                '185': true,
-                '186': false,
-                '187': false,
-                '188': true,
-                '189': true,
-                '190': true,
-                '191': false,
-                '192': true,
-                '193': true,
-                '194': true,
-                '195': true,
-                '196': false,
-                '197': true,
-                '198': true,
-                '199': true,
-                '200': true,
-                '201': true,
-                '202': true,
-                '203': true,
-                '204': false,
-                '205': true,
-                '206': false,
-                '207': false,
-                '208': true,
-                '209': true,
-                '210': true,
-                '211': true,
-                '212': true,
-                '213': true,
-                '214': false,
-                '215': true,
-                '216': false,
-                '217': true,
-                '218': false,
-                '219': false,
-                '220': false,
-                '221': false,
-                '222': false,
-                '223': false,
-                '224': true,
-                '225': true,
-                '226': true,
-                '227': true,
-                '228': true,
-                '229': true,
-                '230': true,
-                '231': false,
-                '232': true,
-                '233': false,
-                '234': true,
-                '235': true,
-                '236': true,
-                '237': true,
-                '238': true,
-                '239': true,
-                '240': true,
-                '241': true,
-                '242': false,
-                '243': false,
-                '244': true,
-                '245': true,
-                '246': true,
-                '247': false,
-                '248': true,
-                '249': true,
-                '250': false,
-                '251': false,
-                '252': true,
-                '253': true,
-                '254': true,
-                '255': true,
-                '256': true,
-                '257': true,
-                '258': true,
-                '259': true,
-                '260': true,
-                '261': false,
-                '262': true,
-                '263': false,
-                '264': true,
-                '265': true,
-                '266': true,
-                '267': false,
-                '268': false,
-                '269': true,
-                '270': true,
-                '271': false,
-                '272': true,
-                '273': true,
-                '274': true,
-                '275': true,
-                '276': true,
-                '277': true,
-                '278': true,
-                '279': true,
-                '280': true,
-                '281': true,
-                '282': true,
-                '283': false,
-                '284': true,
-                '285': true,
-                '286': false,
-                '287': false,
-                '288': true,
-                '289': true,
-                '290': true,
-                '291': true,
-                '292': false,
-                '293': false,
-                '294': true,
-                '295': true,
-                '296': false,
-                '297': true,
-                '298': false,
-                '299': true,
-                '300': false,
-                '301': true,
-                '302': true,
-                '303': true,
-                '304': true,
-                '305': false,
-                '306': false,
-                '307': false,
-                '308': true,
-                '309': true,
-                '310': true,
-                '311': false,
-                '312': false,
-                '313': false,
-                '314': true,
-                '315': true,
-                '316': true,
-                '317': true,
-                '318': true,
-                '319': true,
-                '320': true,
-                '321': false,
-                '322': false,
-                '323': true,
-                '324': false,
-                '325': true,
-                '326': true,
-                '327': false,
-                '328': true,
-                '329': false,
-                '330': false,
-                '331': true,
-                '332': false,
-                '333': true,
-                '334': false,
-                '335': false,
-                '336': false,
-                '337': false,
-                '338': false,
-                '339': true,
-                '340': false,
-                '341': false,
-                '342': false,
-                '343': false,
-                '344': false,
-                '345': true,
-                '346': false,
-                '347': false,
-                '348': false,
-                '349': true,
-                '350': false,
-                '351': false,
-                '352': false,
-                '353': false,
-                '354': true,
-                '355': false,
-                '356': false,
-                '357': false,
-                '358': false,
-                '359': true
-              }
-            }
-          }
-        };
+      Object.entries({
+        'getTCData': (cfg) => ({ getTCData: cfg }),
+        'consent data directly': (cfg) => cfg,
+      }).forEach(([t, packageCfg]) => {
+        describe(`using ${t}`, () => {
+          afterEach(() => {
+            config.resetConfig();
+          });
 
-        setConsentConfig(staticConfig);
-        expect(userCMP).to.be.equal('static');
-        expect(consentTimeout).to.be.equal(0); // should always return without a timeout when config is used
-        expect(allowAuction).to.be.false;
-        expect(staticConsentData).to.be.equal(staticConfig.consentData);
+          it('results in user settings overriding system defaults for v2 spec', async () => {
+            const consentData = {
+              'tcString': 'COuqj-POu90rDBcBkBENAZCgAPzAAAPAACiQFwwBAABAA1ADEAbQC4YAYAAgAxAG0A',
+              'cmpId': 92,
+              'cmpVersion': 100,
+              'tcfPolicyVersion': 2,
+              'gdprApplies': true,
+              'isServiceSpecific': true,
+              'useNonStandardStacks': false,
+              'purposeOneTreatment': false,
+              'publisherCC': 'US',
+              'cmpStatus': 'loaded',
+              'eventStatus': 'tcloaded',
+              'outOfBand': {
+                'allowedVendors': {},
+                'discloseVendors': {}
+              },
+              'purpose': {
+                'consents': {
+                  '1': true,
+                  '2': true,
+                  '3': true
+                },
+                'legitimateInterests': {
+                  '1': false,
+                  '2': false,
+                  '3': false
+                }
+              },
+              'vendor': {
+                'consents': {
+                  '1': false,
+                  '2': true,
+                  '3': false
+                },
+                'legitimateInterests': {
+                  '1': false,
+                  '2': true,
+                  '3': false,
+                  '4': false,
+                  '5': false
+                }
+              },
+              'specialFeatureOptins': {
+                '1': false,
+                '2': false
+              },
+              'restrictions': {},
+              'publisher': {
+                'consents': {
+                  '1': false,
+                  '2': false,
+                  '3': false
+                },
+                'legitimateInterests': {
+                  '1': false,
+                  '2': false,
+                  '3': false
+                },
+                'customPurpose': {
+                  'consents': {},
+                  'legitimateInterests': {}
+                }
+              }
+            };
+
+            await setConsentConfig({
+              cmpApi: 'static',
+              timeout: 7500,
+              consentData: packageCfg(consentData)
+            });
+            expect(consentConfig.cmpHandler).to.be.equal('static');
+            expect(gdprScope).to.be.equal(false);
+            const consent = gdprDataHandler.getConsentData();
+            expect(consent.consentString).to.eql(consentData.tcString);
+            expect(consent.vendorData).to.eql(consentData);
+            expect(consentConfig.staticConsentData).to.be.equal(consentData);
+          });
+
+          it('accepts static TCF 2.3 consent data with disclosedVendors', async () => {
+            const consentData = {
+              'tcString': 'COuqj-POu90rDBcBkBENAZCgAPzAAAPAACiQFwwBAABAA1ADEAbQC4YAYAAgAxAG0A',
+              'cmpId': 92,
+              'cmpVersion': 100,
+              'tcfPolicyVersion': 3,
+              'gdprApplies': true,
+              'isServiceSpecific': true,
+              'useNonStandardStacks': false,
+              'purposeOneTreatment': false,
+              'publisherCC': 'US',
+              'cmpStatus': 'loaded',
+              'eventStatus': 'tcloaded',
+              'outOfBand': {
+                'allowedVendors': {},
+                'discloseVendors': {}
+              },
+              'purpose': {
+                'consents': {
+                  '1': true,
+                  '2': true,
+                  '3': true
+                },
+                'legitimateInterests': {
+                  '1': false,
+                  '2': false,
+                  '3': false
+                }
+              },
+              'vendor': {
+                'consents': {
+                  '1': false,
+                  '2': true,
+                  '3': false
+                },
+                'legitimateInterests': {
+                  '1': false,
+                  '2': true,
+                  '3': false,
+                  '4': false,
+                  '5': false
+                }
+              },
+              'disclosedVendors': {
+                '1': true,
+                '2': true,
+                '3': false
+              },
+              'specialFeatureOptins': {
+                '1': false,
+                '2': false
+              },
+              'restrictions': {},
+              'publisher': {
+                'consents': {
+                  '1': false,
+                  '2': false,
+                  '3': false
+                },
+                'legitimateInterests': {
+                  '1': false,
+                  '2': false,
+                  '3': false
+                },
+                'customPurpose': {
+                  'consents': {},
+                  'legitimateInterests': {}
+                }
+              }
+            };
+
+            await setConsentConfig({
+              cmpApi: 'static',
+              timeout: 7500,
+              consentData: packageCfg(consentData)
+            });
+            const consent = gdprDataHandler.getConsentData();
+            expect(consent.consentString).to.eql(consentData.tcString);
+            expect(consent.vendorData).to.eql(consentData);
+            expect(consent.vendorData.disclosedVendors).to.eql(consentData.disclosedVendors);
+            expect(consent.vendorData.tcfPolicyVersion).to.eql(3);
+          });
+        });
       });
     });
   });
 
   describe('requestBidsHook tests:', function () {
-    let goodConfigWithCancelAuction = {
+    const goodConfig = {
       cmpApi: 'iab',
       timeout: 7500,
-      allowAuctionWithoutConsent: false
     };
 
-    let goodConfigWithAllowAuction = {
-      cmpApi: 'iab',
+    const staticConfig = {
+      cmpApi: 'static',
       timeout: 7500,
-      allowAuctionWithoutConsent: true
+      consentData: {}
     };
 
-    let didHookReturn;
+    beforeEach(resetConsentData);
+    after(resetConsentData);
 
-    afterEach(function () {
-      gdprDataHandler.consentData = null;
-      resetConsentData();
-    });
+    async function runHook(request = {}) {
+      let hookRan = false;
+      consentConfig.requestBidsHook(() => {
+        hookRan = true;
+      }, request);
+      try {
+        await consentConfig.loadConsentData();
+      } catch (e) {
+      }
+      return hookRan;
+    }
 
     describe('error checks:', function () {
       beforeEach(function () {
-        didHookReturn = false;
         sinon.stub(utils, 'logWarn');
         sinon.stub(utils, 'logError');
       });
@@ -487,37 +352,161 @@ describe('consentManagement', function () {
         utils.logWarn.restore();
         utils.logError.restore();
         config.resetConfig();
-        $$PREBID_GLOBAL$$.requestBids.removeAll();
-        resetConsentData();
       });
 
-      it('should throw a warning and return to hooked function when an unknown CMP framework ID is used', function () {
-        let badCMPConfig = {
+      it('should throw a warning and return to hooked function when an unknown CMP framework ID is used', async function () {
+        const badCMPConfig = {
           cmpApi: 'bad'
         };
-        setConsentConfig(badCMPConfig);
-        expect(userCMP).to.be.equal(badCMPConfig.cmpApi);
-
-        requestBidsHook(() => {
-          didHookReturn = true;
-        }, {});
-        let consent = gdprDataHandler.getConsentData();
+        await setConsentConfig(badCMPConfig);
+        expect(consentConfig.cmpHandler).to.be.equal(badCMPConfig.cmpApi);
+        expect(await runHook()).to.be.true;
+        const consent = gdprDataHandler.getConsentData();
         sinon.assert.calledOnce(utils.logWarn);
-        expect(didHookReturn).to.be.true;
         expect(consent).to.be.null;
       });
 
-      it('should throw proper errors when CMP is not found', function () {
-        setConsentConfig(goodConfigWithCancelAuction);
+      it('should call gdprDataHandler.setConsentData() when unknown CMP api is used', async () => {
+        await setConsentConfig({ gdpr: { cmpApi: 'invalid' } });
+        expect(await runHook()).to.be.true;
+        expect(gdprDataHandler.ready).to.be.true;
+      });
 
-        requestBidsHook(() => {
-          didHookReturn = true;
-        }, {});
-        let consent = gdprDataHandler.getConsentData();
-        // throw 2 errors; one for no bidsBackHandler and for CMP not being found (this is an error due to gdpr config)
-        sinon.assert.calledTwice(utils.logError);
-        expect(didHookReturn).to.be.false;
+      it('should throw proper errors when CMP is not found', async function () {
+        await setConsentConfig(goodConfig);
+        expect(await runHook()).to.be.false;
+        const consent = gdprDataHandler.getConsentData();
+        sinon.assert.calledOnce(utils.logError);
         expect(consent).to.be.null;
+        expect(gdprDataHandler.ready).to.be.true;
+      });
+
+      it('should wait for a late CMP only when configured', async function () {
+        const configPromise = setConsentConfig({
+          cmpApi: 'iab',
+          timeout: 500,
+          waitForCmp: true,
+        });
+        setTimeout(() => {
+          window.__tcfapi = mockCMP({ gdprApplies: true, tcString: 'late-consent' });
+        }, 10);
+        try {
+          await configPromise;
+          expect(await runHook()).to.be.true;
+          expect(gdprDataHandler.getConsentData().consentString).to.eql('late-consent');
+        } finally {
+          delete window.__tcfapi;
+        }
+      });
+
+      it('should cancel the auction, and look again on the next one, if a late CMP does not appear within the timeout', async () => {
+        await setConsentConfig({
+          cmpApi: 'iab',
+          timeout: 20,
+          waitForCmp: true,
+        });
+        expect(await runHook()).to.be.false;
+        try {
+          window.__tcfapi = mockCMP({ gdprApplies: true, tcString: 'late-consent' });
+          expect(await runHook()).to.be.true;
+          expect(gdprDataHandler.getConsentData().consentString).to.eql('late-consent');
+        } finally {
+          delete window.__tcfapi;
+        }
+      });
+
+      describe('when reconfigured while an auction waits for the user to act on the CMP', () => {
+        let cmpCallbacks;
+        beforeEach(() => {
+          cmpCallbacks = [];
+          window.__tcfapi = (command, version, callback) => {
+            if (command === 'addEventListener') {
+              cmpCallbacks.push(callback);
+              callback({ eventStatus: 'cmpuishown', gdprApplies: true, tcString: 'pending' }, true);
+            }
+          };
+        });
+        afterEach(() => {
+          delete window.__tcfapi;
+        });
+
+        it('should keep the auction waiting for consent', async () => {
+          const cmConfig = { cmpApi: 'iab', timeout: 5000 };
+          setConsentConfig(cmConfig);
+          let hookRan = false;
+          consentConfig.requestBidsHook(() => { hookRan = true; }, {});
+          setConsentConfig(cmConfig);
+          await new Promise(resolve => setTimeout(resolve, 20));
+          expect(hookRan).to.be.false;
+          cmpCallbacks.forEach(cb => cb({ eventStatus: 'useractioncomplete', gdprApplies: true, tcString: 'user-consent' }, true));
+          await new Promise(resolve => setTimeout(resolve));
+          expect(hookRan).to.be.true;
+          expect(gdprDataHandler.getConsentData().consentString).to.eql('user-consent');
+        });
+      });
+
+      it('should poll again to check if it appears later', async () => {
+        await setConsentConfig({
+          cmpApi: 'iab',
+          timeout: 10,
+        });
+        expect(await runHook()).to.be.false;
+        try {
+          window.__tcfapi = mockCMP({
+            gdprApplies: true,
+            tcString: 'xyz',
+          });
+          expect(await runHook()).to.be.true;
+          expect(gdprDataHandler.getConsentData().consentString).to.eql('xyz');
+        } finally {
+          delete window.__tcfapi;
+        }
+      });
+
+      it('should not trip when adUnits have no size', async () => {
+        await setConsentConfig(staticConfig);
+        expect(await runHook({ adUnits: [{ code: 'test', mediaTypes: { video: {} } }] })).to.be.true;
+      });
+
+      describe('when the auction is canceled, the promise returned by requestBids', () => {
+        function settlement(promise, ms = 100) {
+          return Promise.race([
+            promise.then(() => 'resolved', () => 'rejected'),
+            new Promise(resolve => setTimeout(() => resolve('pending'), ms))
+          ]);
+        }
+
+        const adUnits = [{ code: 'au', mediaTypes: { banner: { sizes: [[300, 250]] } }, bids: [] }];
+
+        Object.entries({
+          'CMP is not found': goodConfig,
+          'static config has no consentData': { cmpApi: 'static' },
+        }).forEach(([t, cmConfig]) => {
+          it(`rejects when ${t}`, async () => {
+            await setConsentConfig(cmConfig);
+            const bidsBackHandler = sinon.stub();
+            expect(await settlement(pbjs.requestBids({ adUnits, bidsBackHandler }))).to.equal('rejected');
+            sinon.assert.calledOnce(bidsBackHandler);
+          });
+        });
+      });
+
+      it('should continue the auction immediately, without consent data, if timeout is 0', async () => {
+        window.__tcfapi = function () {
+        };
+        await setConsentConfig({
+          cmpApi: 'iab',
+          timeout: 0,
+          defaultGdprScope: true
+        });
+        try {
+          expect(await runHook()).to.be.true;
+          const consent = gdprDataHandler.getConsentData();
+          expect(consent.gdprApplies).to.be.true;
+          expect(consent.consentString).to.be.undefined;
+        } finally {
+          delete window.__tcfapi;
+        }
       });
     });
 
@@ -525,260 +514,515 @@ describe('consentManagement', function () {
       let cmpStub = sinon.stub();
 
       beforeEach(function () {
-        didHookReturn = false;
-        window.__cmp = function() {};
+        window.__tcfapi = function () { };
       });
 
       afterEach(function () {
         config.resetConfig();
-        $$PREBID_GLOBAL$$.requestBids.removeAll();
         cmpStub.restore();
-        delete window.__cmp;
+        delete window.__tcfapi;
         resetConsentData();
       });
 
-      it('should bypass CMP and simply use previously stored consentData', function () {
-        let testConsentData = {
+      it('should bypass CMP and simply use previously stored consentData', async function () {
+        const testConsentData = {
           gdprApplies: true,
-          consentData: 'xyz'
+          tcString: 'xyz',
         };
 
-        cmpStub = sinon.stub(window, '__cmp').callsFake((...args) => {
-          args[2](testConsentData);
-        });
-        setConsentConfig(goodConfigWithAllowAuction);
-        requestBidsHook(() => {}, {});
-        cmpStub.restore();
+        cmpStub = sinon.stub(window, '__tcfapi').callsFake(mockCMP(testConsentData));
+        await setConsentConfig(goodConfig);
+        expect(await runHook()).to.be.true;
+        cmpStub.resetHistory();
 
-        // reset the stub to ensure it wasn't called during the second round of calls
-        cmpStub = sinon.stub(window, '__cmp').callsFake((...args) => {
-          args[2](testConsentData);
-        });
-
-        requestBidsHook(() => {
-          didHookReturn = true;
-        }, {});
-        let consent = gdprDataHandler.getConsentData();
-
-        expect(didHookReturn).to.be.true;
-        expect(consent.consentString).to.equal(testConsentData.consentData);
+        expect(await runHook()).to.be.true;
+        const consent = gdprDataHandler.getConsentData();
+        expect(consent.consentString).to.equal(testConsentData.tcString);
         expect(consent.gdprApplies).to.be.true;
         sinon.assert.notCalled(cmpStub);
       });
-    });
 
-    describe('CMP workflow for safeframe page', function () {
-      let registerStub = sinon.stub();
-
-      beforeEach(function () {
-        didHookReturn = false;
-        window.$sf = {
-          ext: {
-            register: function() {},
-            cmp: function() {}
-          }
+      it('should not set consent.gdprApplies to true if defaultGdprScope is true', async function () {
+        const testConsentData = {
+          gdprApplies: false,
+          tcString: 'xyz',
         };
-        sinon.stub(utils, 'logError');
-        sinon.stub(utils, 'logWarn');
-      });
 
-      afterEach(function () {
-        delete window.$sf;
-        config.resetConfig();
-        $$PREBID_GLOBAL$$.requestBids.removeAll();
-        registerStub.restore();
-        utils.logError.restore();
-        utils.logWarn.restore();
-        resetConsentData();
-      });
+        cmpStub = sinon.stub(window, '__tcfapi').callsFake(mockCMP(testConsentData));
 
-      it('should return the consent data from a safeframe callback', function () {
-        var testConsentData = {
-          data: {
-            msgName: 'cmpReturn',
-            vendorConsents: {
-              metadata: 'abc123def',
-              gdprApplies: true
-            },
-            vendorConsentData: {
-              consentData: 'abc123def',
-              gdprApplies: true
-            }
-          }
-        };
-        registerStub = sinon.stub(window.$sf.ext, 'register').callsFake((...args) => {
-          args[2](testConsentData.data.msgName, testConsentData.data);
+        await setConsentConfig({
+          cmpApi: 'iab',
+          timeout: 7500,
+          defaultGdprScope: true
         });
 
-        setConsentConfig(goodConfigWithAllowAuction);
-        requestBidsHook(() => {
-          didHookReturn = true;
-        }, {adUnits: [{ sizes: [[300, 250]] }]});
-        let consent = gdprDataHandler.getConsentData();
-
-        sinon.assert.notCalled(utils.logWarn);
-        sinon.assert.notCalled(utils.logError);
-        expect(didHookReturn).to.be.true;
-        expect(consent.consentString).to.equal('abc123def');
-        expect(consent.gdprApplies).to.be.true;
+        expect(await runHook()).to.be.true;
+        const consent = gdprDataHandler.getConsentData();
+        expect(consent.gdprApplies).to.be.false;
       });
     });
 
-    describe('CMP workflow for iframed page', function () {
-      let ifr = null;
-      let stringifyResponse = false;
+    describe('iframe tests', function () {
+      let cmpPostMessageCb = () => { };
+      let stringifyResponse;
 
-      beforeEach(function () {
-        sinon.stub(utils, 'logError');
-        sinon.stub(utils, 'logWarn');
-        ifr = createIFrameMarker();
-        window.addEventListener('message', cmpMessageHandler, false);
-      });
-
-      afterEach(function () {
-        config.resetConfig();
-        $$PREBID_GLOBAL$$.requestBids.removeAll();
-        delete window.__cmp;
-        utils.logError.restore();
-        utils.logWarn.restore();
-        resetConsentData();
-        document.body.removeChild(ifr);
-        window.removeEventListener('message', cmpMessageHandler);
-      });
-
-      function createIFrameMarker() {
-        var ifr = document.createElement('iframe');
+      function createIFrameMarker(frameName) {
+        const ifr = document.createElement('iframe');
         ifr.width = 0;
         ifr.height = 0;
-        ifr.name = '__cmpLocator';
+        ifr.name = frameName;
         document.body.appendChild(ifr);
         return ifr;
       }
 
-      function cmpMessageHandler(event) {
-        if (event && event.data) {
-          var data = event.data;
-          if (data.__cmpCall) {
-            var callId = data.__cmpCall.callId;
-            var returnValue = null;
-            var response = {
-              __cmpReturn: {
-                callId,
-                returnValue: {
-                  consentData: 'encoded_consent_data_via_post_message',
-                  gdprApplies: true,
-                },
-                success: true
-              }
-            };
-            event.source.postMessage(stringifyResponse ? JSON.stringify(response) : response, '*');
+      function creatCmpMessageHandler(prefix, returnValue) {
+        return function (event) {
+          if (event && event.data) {
+            const data = event.data;
+            if (data[`${prefix}Call`]) {
+              const callId = data[`${prefix}Call`].callId;
+              const response = {
+                [`${prefix}Return`]: {
+                  callId,
+                  returnValue,
+                  success: true
+                }
+              };
+              event.source.postMessage(stringifyResponse ? JSON.stringify(response) : response, '*');
+            }
           }
-        }
+        };
       }
 
-      // Run tests with JSON response and String response
-      // from CMP window postMessage listener.
-      testIFramedPage('with/JSON response', false);
-      testIFramedPage('with/String response', true);
-
-      function testIFramedPage(testName, messageFormatString) {
-        it(`should return the consent string from a postmessage + addEventListener response - ${testName}`, (done) => {
+      function testIFramedPage(testName, messageFormatString, tarConsentString, ver) {
+        it(`should return the consent string from a postmessage + addEventListener response - ${testName}`, async () => {
           stringifyResponse = messageFormatString;
-          setConsentConfig(goodConfigWithAllowAuction);
-          requestBidsHook(() => {
-            let consent = gdprDataHandler.getConsentData();
-            sinon.assert.notCalled(utils.logWarn);
-            sinon.assert.notCalled(utils.logError);
-            expect(consent.consentString).to.equal('encoded_consent_data_via_post_message');
-            expect(consent.gdprApplies).to.be.true;
-            done();
-          }, {});
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+          const consent = gdprDataHandler.getConsentData();
+          sinon.assert.notCalled(utils.logError);
+          expect(consent.consentString).to.equal(tarConsentString);
+          expect(consent.gdprApplies).to.be.true;
+          expect(consent.apiVersion).to.equal(ver);
         });
       }
+
+      beforeEach(function () {
+        sinon.stub(utils, 'logError');
+        sinon.stub(utils, 'logWarn');
+      });
+
+      afterEach(function () {
+        utils.logError.restore();
+        utils.logWarn.restore();
+        config.resetConfig();
+        resetConsentData();
+      });
+
+      describe('v2 CMP workflow for iframe pages:', function () {
+        stringifyResponse = false;
+        let ifr2 = null;
+
+        beforeEach(function () {
+          ifr2 = createIFrameMarker('__tcfapiLocator');
+          cmpPostMessageCb = creatCmpMessageHandler('__tcfapi', {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded'
+          });
+          window.addEventListener('message', cmpPostMessageCb, false);
+        });
+
+        afterEach(function () {
+          delete window.__tcfapi; // deletes the local copy made by the postMessage CMP call function
+          document.body.removeChild(ifr2);
+          window.removeEventListener('message', cmpPostMessageCb);
+        });
+
+        testIFramedPage('with/JSON response', false, 'abc12345234', 2);
+        testIFramedPage('with/String response', true, 'abc12345234', 2);
+      });
     });
 
-    describe('CMP workflow for normal pages:', function () {
+    describe('direct calls to CMP API tests', function () {
       let cmpStub = sinon.stub();
 
       beforeEach(function () {
-        didHookReturn = false;
         sinon.stub(utils, 'logError');
         sinon.stub(utils, 'logWarn');
-        window.__cmp = function() {};
       });
 
       afterEach(function () {
         config.resetConfig();
-        $$PREBID_GLOBAL$$.requestBids.removeAll();
-        cmpStub.restore();
+        if (window.__tcfapi) {
+          cmpStub.restore();
+        }
         utils.logError.restore();
         utils.logWarn.restore();
-        delete window.__cmp;
         resetConsentData();
       });
 
-      it('performs lookup check and stores consentData for a valid existing user', function () {
-        let testConsentData = {
-          gdprApplies: true,
-          consentData: 'BOJy+UqOJy+UqABAB+AAAAAZ+A=='
-        };
-        cmpStub = sinon.stub(window, '__cmp').callsFake((...args) => {
-          args[2](testConsentData);
+      describe('v2 CMP workflow for normal pages:', function () {
+        beforeEach(function() {
+          window.__tcfapi = function () { };
         });
 
-        setConsentConfig(goodConfigWithAllowAuction);
-
-        requestBidsHook(() => {
-          didHookReturn = true;
-        }, {});
-        let consent = gdprDataHandler.getConsentData();
-
-        sinon.assert.notCalled(utils.logWarn);
-        sinon.assert.notCalled(utils.logError);
-        expect(didHookReturn).to.be.true;
-        expect(consent.consentString).to.equal(testConsentData.consentData);
-        expect(consent.gdprApplies).to.be.true;
-      });
-
-      it('throws an error when processCmpData check failed while config had allowAuction set to false', function () {
-        let testConsentData = {};
-        let bidsBackHandlerReturn = false;
-
-        cmpStub = sinon.stub(window, '__cmp').callsFake((...args) => {
-          args[2](testConsentData);
+        afterEach(function () {
+          delete window.__tcfapi;
         });
 
-        setConsentConfig(goodConfigWithCancelAuction);
+        it('performs lookup check and stores consentData for a valid existing user', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded'
+          };
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
 
-        requestBidsHook(() => {
-          didHookReturn = true;
-        }, { bidsBackHandler: () => bidsBackHandlerReturn = true });
-        let consent = gdprDataHandler.getConsentData();
-
-        sinon.assert.calledOnce(utils.logError);
-        expect(didHookReturn).to.be.false;
-        expect(bidsBackHandlerReturn).to.be.true;
-        expect(consent).to.be.null;
-      });
-
-      it('throws a warning + stores consentData + calls callback when processCmpData check failed while config had allowAuction set to true', function () {
-        let testConsentData = {};
-
-        cmpStub = sinon.stub(window, '__cmp').callsFake((...args) => {
-          args[2](testConsentData);
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+          const consent = gdprDataHandler.getConsentData();
+          sinon.assert.notCalled(utils.logError);
+          expect(consent.consentString).to.equal(testConsentData.tcString);
+          expect(consent.gdprApplies).to.be.true;
+          expect(consent.apiVersion).to.equal(2);
         });
 
-        setConsentConfig(goodConfigWithAllowAuction);
+        it('produces gdpr metadata', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded',
+            vendorData: {
+              tcString: 'abc12345234'
+            }
+          };
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
 
-        requestBidsHook(() => {
-          didHookReturn = true;
-        }, {});
-        let consent = gdprDataHandler.getConsentData();
+          await setConsentConfig(goodConfig);
 
-        sinon.assert.calledOnce(utils.logWarn);
-        expect(didHookReturn).to.be.true;
-        expect(consent.consentString).to.be.undefined;
-        expect(consent.gdprApplies).to.be.undefined;
+          expect(await runHook()).to.be.true;
+          const consentMeta = gdprDataHandler.getConsentMeta();
+          sinon.assert.notCalled(utils.logError);
+          expect(consentMeta.consentStringSize).to.be.above(0);
+          expect(consentMeta.gdprApplies).to.be.true;
+          expect(consentMeta.apiVersion).to.equal(2);
+          expect(consentMeta.generatedAt).to.be.above(1644367751709);
+        });
+
+        it('performs lookup check and stores consentData for a valid existing user with additional consent', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            addtlConsent: 'superduperstring',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded'
+          };
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
+
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+          const consent = gdprDataHandler.getConsentData();
+          sinon.assert.notCalled(utils.logError);
+          expect(consent.consentString).to.equal(testConsentData.tcString);
+          expect(consent.addtlConsent).to.equal(testConsentData.addtlConsent);
+          expect(consent.gdprApplies).to.be.true;
+          expect(consent.apiVersion).to.equal(2);
+        });
+
+        it('throws an error when processCmpData check fails + does not call requestBids callback', async function () {
+          const testConsentData = {};
+
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData);
+          });
+
+          await setConsentConfig(goodConfig);
+
+          sinon.assert.notCalled(utils.logWarn);
+          sinon.assert.notCalled(utils.logError);
+
+          [utils.logWarn, utils.logError].forEach((stub) => stub.resetHistory());
+          const reject = sinon.stub();
+          expect(await runHook({ defer: { reject } })).to.be.false;
+          const consent = gdprDataHandler.getConsentData();
+
+          sinon.assert.calledOnce(utils.logError);
+          sinon.assert.notCalled(utils.logWarn);
+          sinon.assert.called(reject);
+          expect(consent).to.be.null;
+          expect(gdprDataHandler.ready).to.be.true;
+        });
+
+        describe('when proper consent is not available', () => {
+          let tcfStub;
+
+          async function runAuction() {
+            await setConsentConfig({
+              cmpApi: 'iab',
+              timeout: 10,
+              defaultGdprScope: true
+            });
+            return new Promise((resolve, reject) => {
+              let hookRan = false;
+              consentConfig.requestBidsHook(() => {
+                hookRan = true;
+              }, {});
+              setTimeout(() => hookRan ? resolve() : reject(new Error('Auction did not run')), 20);
+            });
+          }
+
+          function mockTcfEvent(tcdata) {
+            tcfStub.callsFake((api, version, cb) => {
+              if (api === 'addEventListener' && version === 2) {
+                cb(tcdata, true);
+              }
+            });
+          }
+
+          beforeEach(() => {
+            tcfStub = sinon.stub(window, '__tcfapi');
+          });
+
+          afterEach(() => {
+            tcfStub.restore();
+          });
+
+          it('should continue auction with null consent when CMP is unresponsive', () => {
+            return runAuction().then(() => {
+              const consent = gdprDataHandler.getConsentData();
+              expect(consent.gdprApplies).to.be.true;
+              expect(consent.consentString).to.be.undefined;
+              expect(gdprDataHandler.ready).to.be.true;
+            });
+          });
+
+          it('should use consent provided by events other than tcloaded', () => {
+            mockTcfEvent({
+              eventStatus: 'cmpuishown',
+              tcString: 'mock-consent-string',
+              vendorData: {}
+            });
+            return runAuction().then(() => {
+              const consent = gdprDataHandler.getConsentData();
+              expect(consent.gdprApplies).to.be.true;
+              expect(consent.consentString).to.equal('mock-consent-string');
+              expect(consent.vendorData.vendorData).to.eql({});
+              expect(gdprDataHandler.ready).to.be.true;
+            });
+          });
+
+          it('should timeout after actionTimeout from the first CMP event', async () => {
+            mockTcfEvent({
+              eventStatus: 'cmpuishown',
+              tcString: 'mock-consent-string',
+              vendorData: {}
+            });
+            await setConsentConfig({
+              timeout: 1000,
+              actionTimeout: 100,
+              cmpApi: 'iab',
+              defaultGdprScope: true
+            });
+            let hookRan = false;
+            consentConfig.requestBidsHook(() => {
+              hookRan = true;
+            }, {});
+            return new Promise((resolve) => setTimeout(resolve, 200))
+              .then(() => {
+                expect(hookRan).to.be.true;
+              });
+          });
+
+          it('should still pick up consent data when actionTimeout is 0', async () => {
+            mockTcfEvent({
+              eventStatus: 'tcloaded',
+              tcString: 'mock-consent-string',
+              vendorData: {}
+            });
+            await setConsentConfig({
+              timeout: 1000,
+              actionTimeout: 0,
+              cmpApi: 'iab',
+              defaultGdprScope: true
+            });
+            expect(await runHook()).to.be.true;
+            expect(gdprDataHandler.getConsentData().consentString).to.eql('mock-consent-string');
+          });
+
+          Object.entries({
+            'null': null,
+            'empty': '',
+            'undefined': undefined
+          }).forEach(([t, cs]) => {
+            // some CMPs appear to reply with an empty consent string in 'cmpuishown' - make sure we don't use that
+            it(`should NOT use "default" consent if string is ${t}`, () => {
+              mockTcfEvent({
+                eventStatus: 'cmpuishown',
+                tcString: cs,
+                vendorData: { random: 'junk' }
+              });
+              return runAuction().then(() => {
+                const consent = gdprDataHandler.getConsentData();
+                expect(consent.gdprApplies).to.be.true;
+                expect(consent.consentString).to.be.undefined;
+                expect(consent.vendorData).to.be.undefined;
+              });
+            });
+          });
+        });
+
+        it('it still considers it a valid cmp response if gdprApplies is not a boolean', async function () {
+          // gdprApplies is undefined, should just still store consent response but use whatever defaultGdprScope was
+          const testConsentData = {
+            tcString: 'abc12345234',
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded'
+          };
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
+
+          await setConsentConfig({
+            cmpApi: 'iab',
+            timeout: 7500,
+            defaultGdprScope: true
+          });
+          expect(await runHook()).to.be.true;
+          const consent = gdprDataHandler.getConsentData();
+          sinon.assert.notCalled(utils.logError);
+          expect(consent.consentString).to.equal(testConsentData.tcString);
+          expect(consent.gdprApplies).to.be.true;
+          expect(consent.apiVersion).to.equal(2);
+        });
+
+        it('should set CMP listener ID when listenerId is provided in tcfData', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded',
+            listenerId: 123
+          };
+
+          // Create a spy that will be applied when tcfCmpEventManager is created
+          let setCmpListenerIdSpy = sinon.spy(tcfCmpEventManager, 'setCmpListenerId');
+
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
+
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+
+          sinon.assert.calledOnce(setCmpListenerIdSpy);
+          sinon.assert.calledWith(setCmpListenerIdSpy, 123);
+
+          setCmpListenerIdSpy.restore();
+        });
+
+        it('should not set CMP listener ID when listenerId is null', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded',
+            listenerId: null
+          };
+
+          // Create a spy that will be applied when tcfCmpEventManager is created
+          let setCmpListenerIdSpy = sinon.spy(tcfCmpEventManager, 'setCmpListenerId');
+
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
+
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+
+          sinon.assert.notCalled(setCmpListenerIdSpy);
+
+          setCmpListenerIdSpy.restore();
+        });
+
+        it('should not set CMP listener ID when listenerId is undefined', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded',
+            listenerId: undefined
+          };
+
+          // Create a spy that will be applied when tcfCmpEventManager is created
+          let setCmpListenerIdSpy = sinon.spy(tcfCmpEventManager, 'setCmpListenerId');
+
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
+
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+
+          sinon.assert.notCalled(setCmpListenerIdSpy);
+          setCmpListenerIdSpy.restore();
+        });
+
+        it('should set CMP listener ID when listenerId is 0 (valid listener ID)', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded',
+            listenerId: 0
+          };
+
+          // Create a spy that will be applied when tcfCmpEventManager is created
+          let setCmpListenerIdSpy = sinon.spy(tcfCmpEventManager, 'setCmpListenerId');
+
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
+
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+
+          sinon.assert.calledOnce(setCmpListenerIdSpy);
+          sinon.assert.calledWith(setCmpListenerIdSpy, 0);
+          setCmpListenerIdSpy.restore();
+        });
+
+        it('should set CMP API reference when CMP is found', async function () {
+          const testConsentData = {
+            tcString: 'abc12345234',
+            gdprApplies: true,
+            purposeOneTreatment: false,
+            eventStatus: 'tcloaded'
+          };
+
+          // Create a spy that will be applied when tcfCmpEventManager is created
+          let setCmpApiSpy = sinon.spy(tcfCmpEventManager, 'setCmpApi');
+
+          cmpStub = sinon.stub(window, '__tcfapi').callsFake((...args) => {
+            args[2](testConsentData, true);
+          });
+
+          await setConsentConfig(goodConfig);
+          expect(await runHook()).to.be.true;
+
+          sinon.assert.calledOnce(setCmpApiSpy);
+          expect(setCmpApiSpy.getCall(0).args[0]).to.be.a('function');
+          setCmpApiSpy.restore();
+        });
       });
     });
   });

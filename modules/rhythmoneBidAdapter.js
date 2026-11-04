@@ -1,22 +1,22 @@
 'use strict';
 
-import * as utils from '../src/utils';
-import {registerBidder} from '../src/adapters/bidderFactory';
-import { BANNER, VIDEO } from '../src/mediaTypes';
+import { deepAccess, parseSizesInput, isArray } from '../src/utils.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER, VIDEO } from '../src/mediaTypes.js';
+import { getDNT } from '../libraries/dnt/index.js';
 
 function RhythmOneBidAdapter() {
   this.code = 'rhythmone';
   this.supportedMediaTypes = [VIDEO, BANNER];
+  this.gvlid = 36;
 
-  let SUPPORTED_VIDEO_PROTOCOLS = [2, 3, 5, 6];
-  let SUPPORTED_VIDEO_MIMES = ['video/mp4'];
-  let SUPPORTED_VIDEO_PLAYBACK_METHODS = [1, 2, 3, 4];
-  let SUPPORTED_VIDEO_DELIVERY = [1];
-  let SUPPORTED_VIDEO_API = [1, 2, 5];
-  let slotsToBids = {};
-  let that = this;
-  let version = '2.0.1.0';
-  var win = typeof window !== 'undefined' ? window : {};
+  const SUPPORTED_VIDEO_PROTOCOLS = [2, 3, 5, 6];
+  const SUPPORTED_VIDEO_MIMES = ['video/mp4'];
+  const SUPPORTED_VIDEO_PLAYBACK_METHODS = [1, 2, 3, 4];
+  const SUPPORTED_VIDEO_DELIVERY = [1];
+  const SUPPORTED_VIDEO_API = [1, 2, 5];
+  const slotsToBids = {};
+  const version = '2.1';
 
   this.isBidRequestValid = function (bid) {
     return !!(bid.params && bid.params.placementId);
@@ -26,22 +26,29 @@ function RhythmOneBidAdapter() {
     return [];
   };
 
-  function frameImp(BRs) {
+  function frameImp(BRs, bidderRequest) {
     var impList = [];
+    var isSecure = 0;
+    if (bidderRequest && bidderRequest.refererInfo && bidderRequest.refererInfo.stack.length) {
+      // clever trick to get the protocol
+      var el = document.createElement('a');
+      el.href = bidderRequest.refererInfo.stack[0];
+      isSecure = (el.protocol === 'https:') ? 1 : 0;
+    }
     for (var i = 0; i < BRs.length; i++) {
-      slotsToBids[BRs[i].adUnitCode || BRs[i].placementCode] = BRs[i];
+      slotsToBids[BRs[i].adUnitCode] = BRs[i];
       var impObj = {};
       impObj.id = BRs[i].adUnitCode;
-      impObj.bidfloor = parseFloat(utils.deepAccess(BRs[i], 'params.floor')) || 0;
-      impObj.secure = win.location.protocol === 'https:' ? 1 : 0;
+      impObj.bidfloor = 0;
+      impObj.secure = isSecure;
 
-      if (utils.deepAccess(BRs[i], 'mediaTypes.banner') || utils.deepAccess(BRs[i], 'mediaType') === 'banner') {
-        let banner = frameBanner(BRs[i]);
+      if (deepAccess(BRs[i], 'mediaTypes.banner') || deepAccess(BRs[i], 'mediaType') === 'banner') {
+        const banner = frameBanner(BRs[i]);
         if (banner) {
           impObj.banner = banner;
         }
       }
-      if (utils.deepAccess(BRs[i], 'mediaTypes.video') || utils.deepAccess(BRs[i], 'mediaType') === 'video') {
+      if (deepAccess(BRs[i], 'mediaTypes.video') || deepAccess(BRs[i], 'mediaType') === 'video') {
         impObj.video = frameVideo(BRs[i]);
       }
       if (!(impObj.banner || impObj.video)) {
@@ -55,45 +62,24 @@ function RhythmOneBidAdapter() {
 
   function frameSite(bidderRequest) {
     return {
-      domain: attempt(function() {
-        var d = win.document.location.ancestorOrigins;
-        if (d && d.length > 0) {
-          return d[d.length - 1];
-        }
-        return win.top.document.location.hostname; // try/catch is in the attempt function
-      }, ''),
-      page: attempt(function() {
-        var l;
-        // try/catch is in the attempt function
-        try {
-          l = win.top.document.location.href.toString();
-        } catch (ex) {
-          l = win.document.location.href.toString();
-        }
-        return l;
-      }, ''),
-      ref: attempt(function() {
-        if (bidderRequest && bidderRequest.refererInfo) {
-          return bidderRequest.refererInfo.referer;
-        }
-        return '';
-      }, '')
-    }
+      domain: bidderRequest?.refererInfo?.domain || '',
+      page: bidderRequest?.refererInfo?.page || '',
+      ref: bidderRequest?.refererInfo?.ref || ''
+    };
   }
 
   function frameDevice() {
     return {
       ua: navigator.userAgent,
       ip: '', // Empty Ip string is required, server gets the ip from HTTP header
-      dnt: utils.getDNT() ? 1 : 0,
-    }
+      dnt: getDNT() ? 1 : 0,
+    };
   }
 
   function getValidSizeSet(dimensionList) {
-    let w = parseInt(dimensionList[0]);
-    let h = parseInt(dimensionList[1]);
-    // clever check for NaN
-    if (! (w !== w || h !== h)) {  // eslint-disable-line
+    const w = parseInt(dimensionList[0]);
+    const h = parseInt(dimensionList[1]);
+    if (!Number.isNaN(w) && !Number.isNaN(h)) {
       return [w, h];
     }
     return false;
@@ -105,7 +91,7 @@ function RhythmOneBidAdapter() {
     if (adUnit.mediaTypes && adUnit.mediaTypes.banner) {
       sizeList = adUnit.mediaTypes.banner.sizes;
     }
-    var sizeStringList = utils.parseSizesInput(sizeList);
+    var sizeStringList = parseSizesInput(sizeList);
     var format = [];
     sizeStringList.forEach(function(size) {
       if (size) {
@@ -129,27 +115,27 @@ function RhythmOneBidAdapter() {
 
   function frameVideo(bid) {
     var size = [];
-    if (utils.deepAccess(bid, 'mediaTypes.video.playerSize')) {
+    if (deepAccess(bid, 'mediaTypes.video.playerSize')) {
       var dimensionSet = bid.mediaTypes.video.playerSize;
-      if (utils.isArray(bid.mediaTypes.video.playerSize[0])) {
+      if (isArray(bid.mediaTypes.video.playerSize[0])) {
         dimensionSet = bid.mediaTypes.video.playerSize[0];
       }
-      var validSize = getValidSizeSet(dimensionSet)
+      var validSize = getValidSizeSet(dimensionSet);
       if (validSize) {
         size = validSize;
       }
     }
     return {
-      mimes: utils.deepAccess(bid, 'mediaTypes.video.mimes') || SUPPORTED_VIDEO_MIMES,
-      protocols: utils.deepAccess(bid, 'mediaTypes.video.protocols') || SUPPORTED_VIDEO_PROTOCOLS,
+      mimes: deepAccess(bid, 'mediaTypes.video.mimes') || SUPPORTED_VIDEO_MIMES,
+      protocols: deepAccess(bid, 'mediaTypes.video.protocols') || SUPPORTED_VIDEO_PROTOCOLS,
       w: size[0],
       h: size[1],
-      startdelay: utils.deepAccess(bid, 'mediaTypes.video.startdelay') || 0,
-      skip: utils.deepAccess(bid, 'mediaTypes.video.skip') || 0,
-      playbackmethod: utils.deepAccess(bid, 'mediaTypes.video.playbackmethod') || SUPPORTED_VIDEO_PLAYBACK_METHODS,
-      delivery: utils.deepAccess(bid, 'mediaTypes.video.delivery') || SUPPORTED_VIDEO_DELIVERY,
-      api: utils.deepAccess(bid, 'mediaTypes.video.api') || SUPPORTED_VIDEO_API,
-    }
+      startdelay: deepAccess(bid, 'mediaTypes.video.startdelay') || 0,
+      skip: deepAccess(bid, 'mediaTypes.video.skip') || 0,
+      playbackmethod: deepAccess(bid, 'mediaTypes.video.playbackmethod') || SUPPORTED_VIDEO_PLAYBACK_METHODS,
+      delivery: deepAccess(bid, 'mediaTypes.video.delivery') || SUPPORTED_VIDEO_DELIVERY,
+      api: deepAccess(bid, 'mediaTypes.video.api') || SUPPORTED_VIDEO_API,
+    };
   }
 
   function frameExt(bid) {
@@ -159,28 +145,37 @@ function RhythmOneBidAdapter() {
         zone: (bid.params && bid.params['zone']) ? bid.params['zone'] : '1r',
         path: (bid.params && bid.params['path']) ? bid.params['path'] : 'mvo'
       }
-    }
+    };
   }
 
   function frameBid(BRs, bidderRequest) {
-    return {
+    const bid = {
       id: BRs[0].bidderRequestId,
-      imp: frameImp(BRs),
+      imp: frameImp(BRs, bidderRequest),
       site: frameSite(bidderRequest),
       device: frameDevice(),
       user: {
         ext: {
-          consent: utils.deepAccess(bidderRequest, 'gdprConsent.gdprApplies') ? bidderRequest.gdprConsent.consentString : ''
+          consent: deepAccess(bidderRequest, 'gdprConsent.gdprApplies') ? bidderRequest.gdprConsent.consentString : ''
         }
       },
       at: 1,
-      tmax: 1000,
+      tmax: Math.min(1000, bidderRequest.timeout),
       regs: {
         ext: {
-          gdpr: utils.deepAccess(bidderRequest, 'gdprConsent.gdprApplies') ? Boolean(bidderRequest.gdprConsent.gdprApplies & 1) : false
+          gdpr: deepAccess(bidderRequest, 'gdprConsent.gdprApplies') ? Boolean(bidderRequest.gdprConsent.gdprApplies & 1) : false
         }
       }
     };
+    const schain = BRs[0]?.ortb2?.source?.ext?.schain;
+    if (schain) {
+      bid.source = {
+        'ext': {
+          'schain': schain
+        }
+      };
+    }
+    return bid;
   }
 
   function getFirstParam(key, validBidRequests) {
@@ -191,20 +186,13 @@ function RhythmOneBidAdapter() {
     }
   }
 
-  function attempt(valueFunction, defaultValue) {
-    try {
-      return valueFunction();
-    } catch (ex) { }
-    return defaultValue;
-  }
-
   this.buildRequests = function (BRs, bidderRequest) {
-    let fallbackPlacementId = getFirstParam('placementId', BRs);
+    const fallbackPlacementId = getFirstParam('placementId', BRs);
     if (fallbackPlacementId === undefined || BRs.length < 1) {
       return [];
     }
 
-    var rmpUrl = getFirstParam('endpoint', BRs) || '//tag.1rx.io/rmp/{placementId}/0/{path}?z={zone}';
+    var rmpUrl = getFirstParam('endpoint', BRs) || 'https://tag.1rx.io/rmp/{placementId}/0/{path}?z={zone}';
     var defaultZone = getFirstParam('zone', BRs) || '1r';
     var defaultPath = getFirstParam('path', BRs) || 'mvo';
 
@@ -230,12 +218,11 @@ function RhythmOneBidAdapter() {
 
   this.interpretResponse = function (serverResponse) {
     let responses = serverResponse.body || [];
-    let bids = [];
-    let i = 0;
+    const bids = [];
 
     if (responses.seatbid) {
-      let temp = [];
-      for (i = 0; i < responses.seatbid.length; i++) {
+      const temp = [];
+      for (let i = 0; i < responses.seatbid.length; i++) {
         for (let j = 0; j < responses.seatbid[i].bid.length; j++) {
           temp.push(responses.seatbid[i].bid[j]);
         }
@@ -243,15 +230,17 @@ function RhythmOneBidAdapter() {
       responses = temp;
     }
 
-    for (i = 0; i < responses.length; i++) {
-      let bid = responses[i];
-      let bidRequest = slotsToBids[bid.impid];
-      let bidResponse = {
+    for (let i = 0; i < responses.length; i++) {
+      const bid = responses[i];
+      const bidRequest = slotsToBids[bid.impid];
+      const bidResponse = {
         requestId: bidRequest.bidId,
-        bidderCode: that.code,
         cpm: parseFloat(bid.price),
         width: bid.w,
         height: bid.h,
+        meta: {
+          advertiserDomains: bid.adomain
+        },
         creativeId: bid.crid,
         currency: 'USD',
         netRevenue: true,

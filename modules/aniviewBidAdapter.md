@@ -1,16 +1,16 @@
 # Overview
 
 ```
-Module Name: ANIVIEW Bidder Adapter
+Module Name: Aniview Bidder Adapter
 Module Type: Bidder Adapter
 Maintainer: support@aniview.com
 ```
 
 # Description
 
-Connects to ANIVIEW Ad server for bids.
+Connects to Aniview Ad server for bids.
 
-ANIVIEW bid adapter supports Video ads currently.
+Aniview bid adapter supports Banner and Video currently.
 
 For more information about [Aniview](http://www.aniview.com), please contact [support@aniview.com](support@aniview.com).
 
@@ -18,19 +18,19 @@ For more information about [Aniview](http://www.aniview.com), please contact [su
 ```javascript
 var videoAdUnit = [
 {
-    code: 'video1',
-    sizes: [
-        [300, 250],
-        [640, 480]
-    ],
-    bids: [{
-        bidder: 'aniview',
-        params: {
-            AV_PUBLISHERID: '55b78633181f4603178b4568',
-            AV_CHANNELID: '55b7904d181f46410f8b4568'
-        }
-    }]
+  code: 'video1',
+  mediaTypes: {
+    video: {
+      playerSize: [[640, 480]],
+      context: 'instream'
+    },
+  },
+  bids: [{
+    bidder: 'aniview',
+    params: {
+      AV_PUBLISHERID: '55b78633181f4603178b4568',
+      AV_CHANNELID: '5d19dfca4b6236688c0a2fc4'
+    }
+  }]
 }];
-```
-
 ```

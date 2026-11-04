@@ -1,91 +1,100 @@
+import { config } from './config.js';
+import { getHook, hook } from './hook.js';
+import { logError, prefixLog } from './utils.js';
+import { createBid } from './bidfactory.js';
+import { PbPromise } from './utils/promise.js';
+import * as utils from './utils.js';
+import { BANNER, NATIVE, VIDEO } from './mediaTypes.js';
+import { Renderer } from './Renderer.js';
+import { getCoreStorageManager } from './storageManager.js';
+import { hasPubcidOptout } from '../libraries/fpdUtils/pubcidOptout.js';
+import { standaloneModuleLoader } from './standaloneModuleLoader.js';
 
-import { config } from './config';
-import { logMessage as utilsLogMessage, logWarn as utilsLogWarn } from './utils';
-import { addBidResponse } from './auction';
+import { getGlobalVarName } from './buildOptions.js';
 
-const OVERRIDE_KEY = '$$PREBID_GLOBAL$$:debugging';
+const STORAGE = getCoreStorageManager('debugging');
 
-export let boundHook;
-
-function logMessage(msg) {
-  utilsLogMessage('DEBUG: ' + msg);
+export function getPubcidOptout() {
+  return hasPubcidOptout(STORAGE);
 }
 
-function logWarn(msg) {
-  utilsLogWarn('DEBUG: ' + msg);
+export const DEBUG_KEY = `__${getGlobalVarName()}_debugging__`;
+
+export function debuggingModuleLoader({ alreadyInstalled, script } = {}) {
+  return standaloneModuleLoader({
+    moduleName: 'debugging',
+    installProp: '_installDebugging',
+    bundle: 'debugging-standalone.js',
+    deps: {
+      DEBUG_KEY,
+      hook,
+      config,
+      createBid,
+      logger: prefixLog('DEBUG:'),
+      utils,
+      BANNER,
+      NATIVE,
+      VIDEO,
+      Renderer,
+      getPubcidOptout,
+    },
+    alreadyInstalled,
+    script,
+  });
 }
 
-function removeHook() {
-  addBidResponse.getHooks({hook: boundHook}).remove()
-}
-
-function enableOverrides(overrides, fromSession = false) {
-  config.setConfig({'debug': true});
-  logMessage(`bidder overrides enabled${fromSession ? ' from session' : ''}`);
-
-  removeHook();
-
-  boundHook = addBidResponseHook.bind(overrides);
-  addBidResponse.before(boundHook, 5);
-}
-
-export function disableOverrides() {
-  removeHook();
-  logMessage('bidder overrides disabled');
-}
-
-export function addBidResponseHook(next, adUnitCode, bid) {
-  let overrides = this;
-  if (Array.isArray(overrides.bidders) && overrides.bidders.indexOf(bid.bidderCode) === -1) {
-    logWarn(`bidder '${bid.bidderCode}' excluded from auction by bidder overrides`);
-    return;
+export function debuggingControls({ load = debuggingModuleLoader(), hook = getHook('requestBids') } = {}) {
+  let promise = null;
+  let enabled = false;
+  function waitForDebugging(next, ...args) {
+    return (promise || PbPromise.resolve())
+      .catch((e) => {
+        logError(`Could not load debugging module`, e);
+      })
+      .then(() => next.apply(this, args));
   }
-
-  if (Array.isArray(overrides.bids)) {
-    overrides.bids.forEach(overrideBid => {
-      if (overrideBid.bidder && overrideBid.bidder !== bid.bidderCode) {
-        return;
-      }
-      if (overrideBid.adUnitCode && overrideBid.adUnitCode !== adUnitCode) {
-        return;
-      }
-
-      bid = Object.assign({}, bid);
-
-      Object.keys(overrideBid).filter(key => ['bidder', 'adUnitCode'].indexOf(key) === -1).forEach((key) => {
-        let value = overrideBid[key];
-        logMessage(`bidder overrides changed '${adUnitCode}/${bid.bidderCode}' bid.${key} from '${bid[key]}' to '${value}'`);
-        bid[key] = value;
-      });
-    });
+  function enable() {
+    if (!enabled) {
+      promise = load();
+      // set debugging to high priority so that it has the opportunity to mess with most things
+      hook.before(waitForDebugging, 99);
+      enabled = true;
+    }
   }
-
-  next(adUnitCode, bid);
+  function disable() {
+    hook.getHooks({ hook: waitForDebugging }).remove();
+    enabled = false;
+  }
+  function reset() {
+    promise = null;
+    disable();
+  }
+  return { enable, disable, reset };
 }
 
-export function getConfig(debugging) {
-  if (!debugging.enabled) {
-    disableOverrides();
-    try {
-      window.sessionStorage.removeItem(OVERRIDE_KEY);
-    } catch (e) {}
-  } else {
-    try {
-      window.sessionStorage.setItem(OVERRIDE_KEY, JSON.stringify(debugging));
-    } catch (e) {}
-    enableOverrides(debugging);
-  }
-}
-config.getConfig('debugging', ({debugging}) => getConfig(debugging));
+const ctl = debuggingControls();
+export const reset = ctl.reset;
 
-export function sessionLoader(storage) {
-  let overrides;
+export function loadSession() {
+  let storage = null;
   try {
-    storage = storage || window.sessionStorage;
-    overrides = JSON.parse(storage.getItem(OVERRIDE_KEY));
-  } catch (e) {
-  }
-  if (overrides) {
-    enableOverrides(overrides, true);
+    // eslint-disable-next-line no-restricted-properties
+    storage = window.sessionStorage;
+  } catch (e) {}
+
+  if (storage !== null) {
+    const debugging = ctl;
+    let config = null;
+    try {
+      config = storage.getItem(DEBUG_KEY);
+    } catch (e) {}
+    if (config !== null) {
+      // just make sure the module runs; it will take care of parsing the config (and disabling itself if necessary)
+      debugging.enable();
+    }
   }
 }
+
+config.getConfig('debugging', function ({ debugging }) {
+  debugging?.enabled ? ctl.enable() : ctl.disable();
+});

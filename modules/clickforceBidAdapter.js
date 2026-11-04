@@ -1,8 +1,15 @@
-import * as utils from '../src/utils';
-import {registerBidder} from '../src/adapters/bidderFactory';
-import {BANNER, NATIVE} from '../src/mediaTypes';
+import { _each } from '../src/utils.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER, NATIVE } from '../src/mediaTypes.js';
+import { convertOrtbRequestToProprietaryNative } from '../src/native.js';
+
+/**
+ * @typedef {import('../src/adapters/bidderFactory.js').BidRequest} BidRequest
+ * @typedef {import('../src/adapters/bidderFactory.js').Bid} Bid
+ */
+
 const BIDDER_CODE = 'clickforce';
-const ENDPOINT_URL = '//ad.doublemax.net/adserver/prebid.json?cb=' + new Date().getTime() + '&hb=1&ver=1.21';
+const ENDPOINT_URL = 'https://ad.holmesmind.com/adserver/prebid.json?cb=' + new Date().getTime() + '&hb=1&ver=1.21';
 
 export const spec = {
   code: BIDDER_CODE,
@@ -24,8 +31,11 @@ export const spec = {
    * @return ServerRequest Info describing the request to the server.
    */
   buildRequests: function(validBidRequests) {
+    // convert Native ORTB definition to old-style prebid native definition
+    validBidRequests = convertOrtbRequestToProprietaryNative(validBidRequests);
+
     const bidParams = [];
-    utils._each(validBidRequests, function(bid) {
+    _each(validBidRequests, function(bid) {
       bidParams.push({
         z: bid.params.zone,
         bidId: bid.bidId
@@ -50,16 +60,16 @@ export const spec = {
     const cfResponses = [];
     const bidRequestList = [];
 
-    if (typeof bidRequest != 'undefined') {
-      utils._each(bidRequest.validBidRequests, function(req) {
+    if (typeof bidRequest !== 'undefined') {
+      _each(bidRequest.validBidRequests, function(req) {
         bidRequestList[req.bidId] = req;
       });
     }
 
-    utils._each(serverResponse.body, function(response) {
+    _each(serverResponse.body, function(response) {
       if (response.requestId != null) {
         // native ad size
-        if (response.width == 3) {
+        if (Number(response.width) === 3) {
           cfResponses.push({
             requestId: response.requestId,
             cpm: response.cpm,
@@ -88,6 +98,9 @@ export const spec = {
               impressionTrackers: response.tag.iu,
             },
             mediaType: 'native',
+            meta: {
+              advertiserDomains: response.adomain || []
+            },
           });
         } else {
           // display ad
@@ -102,6 +115,9 @@ export const spec = {
             ttl: response.ttl,
             ad: response.tag,
             mediaType: 'banner',
+            meta: {
+              advertiserDomains: response.adomain || []
+            },
           });
         }
       }
@@ -112,13 +128,13 @@ export const spec = {
     if (syncOptions.iframeEnabled) {
       return [{
         type: 'iframe',
-        url: 'https://cdn.doublemax.net/js/capmapping.htm'
-      }]
+        url: 'https://cdn.holmesmind.com/js/capmapping.htm'
+      }];
     } else if (syncOptions.pixelEnabled) {
       return [{
         type: 'image',
-        url: 'https://c.doublemax.net/cm'
-      }]
+        url: 'https://c.holmesmind.com/cm'
+      }];
     }
   }
 };

@@ -1,112 +1,115 @@
-import * as utils from '../src/utils'
-import { registerBidder } from '../src/adapters/bidderFactory'
-import { config } from '../src/config'
-const BIDDER_CODE = 'ccx'
-const BID_URL = 'https://delivery.clickonometrics.pl/ortb/prebid/bid'
-const SUPPORTED_VIDEO_PROTOCOLS = [2, 3, 5, 6]
-const SUPPORTED_VIDEO_MIMES = ['video/mp4', 'video/x-flv']
-const SUPPORTED_VIDEO_PLAYBACK_METHODS = [1, 2, 3, 4]
+import { _each, deepAccess, isArray, isEmpty, logWarn } from '../src/utils.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { getStorageManager } from '../src/storageManager.js';
+
+const BIDDER_CODE = 'ccx';
+const GVLID = 773;
+const storage = getStorageManager({ bidderCode: BIDDER_CODE });
+const BID_URL = 'https://delivery.clickonometrics.pl/ortb/prebid/bid';
+const SUPPORTED_VIDEO_PROTOCOLS = [2, 3, 5, 6];
+const SUPPORTED_VIDEO_MIMES = ['video/mp4', 'video/x-flv'];
+const SUPPORTED_VIDEO_PLAYBACK_METHODS = [1, 2, 3, 4];
 
 function _getDeviceObj () {
-  let device = {}
-  device.w = screen.width
-  device.y = screen.height
-  device.ua = navigator.userAgent
-  return device
+  const device = {};
+  device.w = screen.width;
+  device.y = screen.height;
+  device.ua = navigator.userAgent;
+  return device;
 }
 
-function _getSiteObj () {
-  let site = {}
-  let url = config.getConfig('pageUrl') || utils.getTopWindowUrl()
+function _getSiteObj (bidderRequest) {
+  const site = {};
+  let url = bidderRequest?.refererInfo?.page || '';
   if (url.length > 0) {
-    url = url.split('?')[0]
+    url = url.split('?')[0];
   }
-  site.page = url
+  site.page = url;
 
-  return site
+  return site;
 }
 
 function _validateSizes (sizeObj, type) {
-  if (!utils.isArray(sizeObj) || typeof sizeObj[0] === 'undefined') {
-    return false
+  if (!isArray(sizeObj) || typeof sizeObj[0] === 'undefined') {
+    return false;
   }
 
-  if (type === 'video' && (!utils.isArray(sizeObj[0]) || sizeObj[0].length !== 2)) {
-    return false
+  if (type === 'video' && (!isArray(sizeObj[0]) || sizeObj[0].length !== 2)) {
+    return false;
   }
 
-  let result = true
+  let result = true;
 
   if (type === 'banner') {
-    utils._each(sizeObj, function (size) {
-      if (!utils.isArray(size) || (size.length !== 2)) {
-        result = false
+    _each(sizeObj, function (size) {
+      if (!isArray(size) || (size.length !== 2)) {
+        result = false;
       }
-    })
-    return result
+    });
+    return result;
   }
 
   if (type === 'old') {
-    if (!utils.isArray(sizeObj[0]) && sizeObj.length !== 2) {
-      result = false
-    } else if (utils.isArray(sizeObj[0])) {
-      utils._each(sizeObj, function (size) {
-        if (!utils.isArray(size) || (size.length !== 2)) {
-          result = false
+    if (!isArray(sizeObj[0]) && sizeObj.length !== 2) {
+      result = false;
+    } else if (isArray(sizeObj[0])) {
+      _each(sizeObj, function (size) {
+        if (!isArray(size) || (size.length !== 2)) {
+          result = false;
         }
-      })
+      });
     }
     return result;
   }
 
-  return true
+  return true;
 }
 
-function _buildBid (bid) {
-  let placement = {}
-  placement.id = bid.bidId
-  placement.secure = 1
+function _buildBid (bid, bidderRequest) {
+  const placement = {};
+  placement.id = bid.bidId;
+  placement.secure = 1;
 
-  let sizes = utils.deepAccess(bid, 'mediaTypes.banner.sizes') || utils.deepAccess(bid, 'mediaTypes.video.playerSize') || utils.deepAccess(bid, 'sizes')
+  const sizes = deepAccess(bid, 'mediaTypes.banner.sizes') || deepAccess(bid, 'mediaTypes.video.playerSize') || deepAccess(bid, 'sizes');
 
-  if (utils.deepAccess(bid, 'mediaTypes.banner') || utils.deepAccess(bid, 'mediaType') === 'banner' || (!utils.deepAccess(bid, 'mediaTypes.video') && !utils.deepAccess(bid, 'mediaType'))) {
-    placement.banner = {'format': []}
-    if (utils.isArray(sizes[0])) {
-      utils._each(sizes, function (size) {
-        placement.banner.format.push({'w': size[0], 'h': size[1]})
-      })
+  if (deepAccess(bid, 'mediaTypes.banner') || deepAccess(bid, 'mediaType') === 'banner' || (!deepAccess(bid, 'mediaTypes.video') && !deepAccess(bid, 'mediaType'))) {
+    placement.banner = { 'format': [] };
+    if (isArray(sizes[0])) {
+      _each(sizes, function (size) {
+        placement.banner.format.push({ 'w': size[0], 'h': size[1] });
+      });
     } else {
-      placement.banner.format.push({'w': sizes[0], 'h': sizes[1]})
+      placement.banner.format.push({ 'w': sizes[0], 'h': sizes[1] });
     }
-  } else if (utils.deepAccess(bid, 'mediaTypes.video') || utils.deepAccess(bid, 'mediaType') === 'video') {
-    placement.video = {}
+  } else if (deepAccess(bid, 'mediaTypes.video') || deepAccess(bid, 'mediaType') === 'video') {
+    placement.video = {};
 
     if (typeof sizes !== 'undefined') {
-      if (utils.isArray(sizes[0])) {
-        placement.video.w = sizes[0][0]
-        placement.video.h = sizes[0][1]
+      if (isArray(sizes[0])) {
+        placement.video.w = sizes[0][0];
+        placement.video.h = sizes[0][1];
       } else {
-        placement.video.w = sizes[0]
-        placement.video.h = sizes[1]
+        placement.video.w = sizes[0];
+        placement.video.h = sizes[1];
       }
     }
 
-    placement.video.protocols = utils.deepAccess(bid, 'params.video.protocols') || SUPPORTED_VIDEO_PROTOCOLS
-    placement.video.mimes = utils.deepAccess(bid, 'params.video.mimes') || SUPPORTED_VIDEO_MIMES
-    placement.video.playbackmethod = utils.deepAccess(bid, 'params.video.playbackmethod') || SUPPORTED_VIDEO_PLAYBACK_METHODS
-    placement.video.skip = utils.deepAccess(bid, 'params.video.skip') || 0
-    if (placement.video.skip === 1 && utils.deepAccess(bid, 'params.video.skipafter')) {
-      placement.video.skipafter = utils.deepAccess(bid, 'params.video.skipafter')
+    placement.video.protocols = deepAccess(bid, 'mediaTypes.video.protocols') || deepAccess(bid, 'params.video.protocols') || SUPPORTED_VIDEO_PROTOCOLS;
+    placement.video.mimes = deepAccess(bid, 'mediaTypes.video.mimes') || deepAccess(bid, 'params.video.mimes') || SUPPORTED_VIDEO_MIMES;
+    placement.video.playbackmethod = deepAccess(bid, 'mediaTypes.video.playbackmethod') || deepAccess(bid, 'params.video.playbackmethod') || SUPPORTED_VIDEO_PLAYBACK_METHODS;
+    placement.video.skip = deepAccess(bid, 'mediaTypes.video.skip') || deepAccess(bid, 'params.video.skip') || 0;
+    if (placement.video.skip === 1 && (deepAccess(bid, 'mediaTypes.video.skipafter') || deepAccess(bid, 'params.video.skipafter'))) {
+      placement.video.skipafter = deepAccess(bid, 'mediaTypes.video.skipafter') || deepAccess(bid, 'params.video.skipafter');
     }
   }
 
-  placement.ext = {'pid': bid.params.placementId}
+  placement.ext = { 'pid': bid.params.placementId };
 
-  return placement
+  return placement;
 }
 
 function _buildResponse (bid, currency, ttl) {
-  let resp = {
+  const resp = {
     requestId: bid.impid,
     cpm: bid.price,
     width: bid.w,
@@ -115,102 +118,124 @@ function _buildResponse (bid, currency, ttl) {
     netRevenue: false,
     ttl: ttl,
     currency: currency
+  };
+
+  resp.meta = {};
+  if (bid.adomain && bid.adomain.length > 0) {
+    resp.meta.advertiserDomains = bid.adomain;
   }
 
   if (bid.ext.type === 'video') {
-    resp.vastXml = bid.adm
+    resp.vastXml = bid.adm;
   } else {
-    resp.ad = bid.adm
+    resp.ad = bid.adm;
   }
 
-  if (utils.deepAccess(bid, 'dealid')) {
-    resp.dealId = bid.dealid
+  if (deepAccess(bid, 'dealid')) {
+    resp.dealId = bid.dealid;
   }
 
-  return resp
+  return resp;
 }
 
 export const spec = {
   code: BIDDER_CODE,
+  gvlid: GVLID,
   supportedMediaTypes: ['banner', 'video'],
 
   isBidRequestValid: function (bid) {
-    if (!utils.deepAccess(bid, 'params.placementId')) {
-      utils.logWarn('placementId param is reqeuired.')
-      return false
+    if (!deepAccess(bid, 'params.placementId')) {
+      logWarn('placementId param is required.');
+      return false;
     }
-    if (utils.deepAccess(bid, 'mediaTypes.banner.sizes')) {
-      let isValid = _validateSizes(bid.mediaTypes.banner.sizes, 'banner')
+    if (deepAccess(bid, 'mediaTypes.banner.sizes')) {
+      const isValid = _validateSizes(bid.mediaTypes.banner.sizes, 'banner');
       if (!isValid) {
-        utils.logWarn('Bid sizes are invalid.')
+        logWarn('Bid sizes are invalid.');
       }
-      return isValid
-    } else if (utils.deepAccess(bid, 'mediaTypes.video.playerSize')) {
-      let isValid = _validateSizes(bid.mediaTypes.video.playerSize, 'video')
+      return isValid;
+    } else if (deepAccess(bid, 'mediaTypes.video.playerSize')) {
+      const isValid = _validateSizes(bid.mediaTypes.video.playerSize, 'video');
       if (!isValid) {
-        utils.logWarn('Bid sizes are invalid.')
+        logWarn('Bid sizes are invalid.');
       }
-      return isValid
-    } else if (utils.deepAccess(bid, 'sizes')) {
-      let isValid = _validateSizes(bid.sizes, 'old')
+      return isValid;
+    } else if (deepAccess(bid, 'sizes')) {
+      const isValid = _validateSizes(bid.sizes, 'old');
       if (!isValid) {
-        utils.logWarn('Bid sizes are invalid.')
+        logWarn('Bid sizes are invalid.');
       }
-      return isValid
+      return isValid;
     } else {
-      utils.logWarn('Bid sizes are required.')
-      return false
+      logWarn('Bid sizes are required.');
+      return false;
     }
   },
   buildRequests: function (validBidRequests, bidderRequest) {
     // check if validBidRequests is not empty
     if (validBidRequests.length > 0) {
-      let requestBody = {}
-      requestBody.imp = []
-      requestBody.site = _getSiteObj()
-      requestBody.device = _getDeviceObj()
-      requestBody.id = bidderRequest.bids[0].auctionId
-      requestBody.ext = {'ce': (utils.cookiesAreEnabled() ? 1 : 0)}
-      utils._each(validBidRequests, function (bid) {
-        requestBody.imp.push(_buildBid(bid))
-      })
+      const requestBody = {};
+      requestBody.imp = [];
+      requestBody.site = _getSiteObj(bidderRequest);
+      requestBody.device = _getDeviceObj();
+      requestBody.id = bidderRequest.bidderRequestId;
+      requestBody.ext = { 'ce': (storage.cookiesAreEnabled() ? 1 : 0) };
+
+      // Attaching GDPR Consent Params
+      if (bidderRequest && bidderRequest.gdprConsent) {
+        requestBody.user = {
+          ext: {
+            consent: bidderRequest.gdprConsent.consentString
+          }
+        };
+
+        requestBody.regs = {
+          ext: {
+            gdpr: (bidderRequest.gdprConsent.gdprApplies ? 1 : 0)
+          }
+        };
+      }
+
+      _each(validBidRequests, function (bid) {
+        requestBody.imp.push(_buildBid(bid, bidderRequest));
+      });
       // Return the server request
       return {
         'method': 'POST',
         'url': BID_URL,
         'data': JSON.stringify(requestBody)
-      }
+      };
     }
   },
   interpretResponse: function (serverResponse, request) {
-    const bidResponses = []
+    const bidResponses = [];
 
     // response is not empty (HTTP 204)
-    if (!utils.isEmpty(serverResponse.body)) {
-      utils._each(serverResponse.body.seatbid, function (seatbid) {
-        utils._each(seatbid.bid, function (bid) {
-          bidResponses.push(_buildResponse(bid, serverResponse.body.cur, serverResponse.body.ext.ttl))
-        })
-      })
+    if (!isEmpty(serverResponse.body)) {
+      _each(serverResponse.body.seatbid, function (seatbid) {
+        _each(seatbid.bid, function (bid) {
+          bidResponses.push(_buildResponse(bid, serverResponse.body.cur, serverResponse.body.ext.ttl));
+        });
+      });
     }
 
-    return bidResponses
+    return bidResponses;
   },
   getUserSyncs: function (syncOptions, serverResponses) {
-    const syncs = []
+    const syncs = [];
 
-    if (utils.deepAccess(serverResponses[0], 'body.ext.usersync') && !utils.isEmpty(serverResponses[0].body.ext.usersync)) {
-      utils._each(serverResponses[0].body.ext.usersync, function (match) {
+    if (deepAccess(serverResponses[0], 'body.ext.usersync') && !isEmpty(serverResponses[0].body.ext.usersync)) {
+      _each(serverResponses[0].body.ext.usersync, function (match) {
         if ((syncOptions.iframeEnabled && match.type === 'iframe') || (syncOptions.pixelEnabled && match.type === 'image')) {
           syncs.push({
             type: match.type,
             url: match.url
-          })
+          });
         }
-      })
+      });
     }
 
-    return syncs
+    return syncs;
   }
-}
-registerBidder(spec)
+};
+registerBidder(spec);

@@ -1,8 +1,8 @@
-import {registerBidder} from '../src/adapters/bidderFactory';
-import * as utils from '../src/utils';
-import {BANNER} from '../src/mediaTypes';
+import { deepAccess, logInfo } from '../src/utils.js';
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER } from '../src/mediaTypes.js';
 
-const ENDPOINT_URL = '//x.padsquad.com/auction';
+const ENDPOINT_URL = 'https://x.padsquad.com/auction';
 
 const DEFAULT_BID_TTL = 30;
 const DEFAULT_CURRENCY = 'USD';
@@ -40,12 +40,12 @@ export const spec = {
     }));
 
     const openrtbRequest = {
-      id: bidderRequest.auctionId,
+      id: bidderRequest.bidderRequestId,
       imp: impressions,
       site: {
-        domain: window.location.hostname,
-        page: window.location.href,
-        ref: bidderRequest.refererInfo ? bidderRequest.refererInfo.referer || null : null
+        domain: bidderRequest?.refererInfo?.domain,
+        page: bidderRequest?.refererInfo?.page,
+        ref: bidderRequest?.refererInfo?.ref,
       },
       ext: {
         exchange: {
@@ -57,8 +57,8 @@ export const spec = {
 
     // apply gdpr
     if (bidderRequest.gdprConsent) {
-      openrtbRequest.regs = {ext: {gdpr: bidderRequest.gdprConsent.gdprApplies ? 1 : 0}};
-      openrtbRequest.user = {ext: {consent: bidderRequest.gdprConsent.consentString}};
+      openrtbRequest.regs = { ext: { gdpr: bidderRequest.gdprConsent.gdprApplies ? 1 : 0 } };
+      openrtbRequest.user = { ext: { consent: bidderRequest.gdprConsent.consentString } };
     }
 
     const payloadString = JSON.stringify(openrtbRequest);
@@ -83,17 +83,18 @@ export const spec = {
           ad: bid.adm,
           ttl: DEFAULT_BID_TTL,
           creativeId: bid.crid,
+          meta: { advertiserDomains: bid.adomain },
           netRevenue: DEFAULT_NET_REVENUE,
           currency: DEFAULT_CURRENCY,
-        })
-      })
+        });
+      });
     } else {
-      utils.logInfo('padsquad.interpretResponse :: no valid responses to interpret');
+      logInfo('padsquad.interpretResponse :: no valid responses to interpret');
     }
     return bidResponses;
   },
   getUserSyncs: function (syncOptions, serverResponses) {
-    utils.logInfo('padsquad.getUserSyncs', 'syncOptions', syncOptions, 'serverResponses', serverResponses);
+    logInfo('padsquad.getUserSyncs', 'syncOptions', syncOptions, 'serverResponses', serverResponses);
     let syncs = [];
 
     if (!syncOptions.iframeEnabled && !syncOptions.pixelEnabled) {
@@ -101,7 +102,7 @@ export const spec = {
     }
 
     serverResponses.forEach(resp => {
-      const userSync = utils.deepAccess(resp, 'body.ext.usersync');
+      const userSync = deepAccess(resp, 'body.ext.usersync');
       if (userSync) {
         let syncDetails = [];
         Object.keys(userSync).forEach(key => {
@@ -118,10 +119,10 @@ export const spec = {
         });
 
         if (!syncOptions.iframeEnabled) {
-          syncs = syncs.filter(s => s.type !== 'iframe')
+          syncs = syncs.filter(s => s.type !== 'iframe');
         }
         if (!syncOptions.pixelEnabled) {
-          syncs = syncs.filter(s => s.type !== 'image')
+          syncs = syncs.filter(s => s.type !== 'image');
         }
       }
     });

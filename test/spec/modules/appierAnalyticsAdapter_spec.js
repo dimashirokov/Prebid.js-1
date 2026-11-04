@@ -1,10 +1,10 @@
 import {
   appierAnalyticsAdapter, getCpmInUsd, parseBidderCode, parseAdUnitCode,
   ANALYTICS_VERSION, BIDDER_STATUS
-} from 'modules/appierAnalyticsAdapter';
-import {expect} from 'chai';
+} from 'modules/appierAnalyticsAdapter.js';
+import { expect } from 'chai';
 const events = require('src/events');
-const constants = require('src/constants.json');
+const constants = require('src/constants.js');
 
 const affiliateId = 'WhctHaViHtI';
 const configId = 'd9cc9a9be9b240eda17cf1c9a8a4b29c';
@@ -15,8 +15,6 @@ const auctionId = 'b0b39610-b941-4659-a87c-de9f62d3e13e';
 
 describe('Appier Prebid AnalyticsAdapter Testing', function () {
   describe('event tracking and message cache manager', function () {
-    let xhr;
-
     beforeEach(function () {
       const configOptions = {
         affiliateId: affiliateId,
@@ -32,12 +30,10 @@ describe('Appier Prebid AnalyticsAdapter Testing', function () {
         provider: 'appierAnalytics',
         options: configOptions
       });
-      xhr = sinon.useFakeXMLHttpRequest();
     });
 
     afterEach(function () {
       appierAnalyticsAdapter.disableAnalytics();
-      xhr.restore();
     });
 
     describe('#getCpmInUsd()', function() {
@@ -56,7 +52,7 @@ describe('Appier Prebid AnalyticsAdapter Testing', function () {
             originalCurrency: 'USD',
             ad: '<html>fake ad1</html>'
           },
-        ]
+        ];
         const result = getCpmInUsd(receivedBids[0]);
         expect(result).to.equal(0.1);
       });
@@ -126,7 +122,7 @@ describe('Appier Prebid AnalyticsAdapter Testing', function () {
     });
 
     describe('#getCachedAuction()', function() {
-      const existing = {timeoutBids: [{}]};
+      const existing = { timeoutBids: [{}] };
       appierAnalyticsAdapter.cachedAuctions['test_auction_id'] = existing;
 
       it('should get the existing cached object if it exists', function() {
@@ -531,7 +527,7 @@ describe('Appier Prebid AnalyticsAdapter Testing', function () {
               originalCurrency: 'USD',
               ad: '<html>fake ad1</html>'
             },
-          ]
+          ];
 
           appierAnalyticsAdapter.handleBidWon(receivedBids[0]);
           sinon.assert.callCount(appierAnalyticsAdapter.createImpressionMessage, 1);

@@ -1,120 +1,168 @@
-import includes from 'core-js/library/fn/array/includes';
-import * as utils from './utils';
+import { ACTIVITY_LOAD_EXTERNAL_SCRIPT } from './activities/activities.js';
+import { activityParams } from './activities/activityParams.js';
+import { isActivityAllowed } from './activities/rules.js';
 
-const _requestCache = {};
-const _vendorWhitelist = [
-  'criteo',
-]
+import { insertElement, logError, logWarn, setScriptAttributes, memoize } from './utils.js';
+
+const _requestCache = new WeakMap();
+
+function isAllowed(url, moduleType, moduleCode) {
+  if (!moduleType || !moduleCode || !url) {
+    logError('cannot load external script without url, moduleType, or moduleCode');
+    return false;
+  }
+  if (!isActivityAllowed(ACTIVITY_LOAD_EXTERNAL_SCRIPT, activityParams(moduleType, moduleCode))) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Loads external javascript. Can only be used if external JS is approved by Prebid. See https://github.com/prebid/prebid-js-external-js-template#policy
  * Each unique URL will be loaded at most 1 time.
  * @param {string} url the url to load
+ * @param {string} moduleType moduleType of the module requesting this resource
  * @param {string} moduleCode bidderCode or module code of the module requesting this resource
+ * @param {function} [callback] callback function to be called after the script is loaded
+ * @param {Document} [doc] the context document, in which the script will be loaded, defaults to loaded document
+ * @param {object} attributes an object of attributes to be added to the script with setAttribute by [key] and [value]; Only the attributes passed in the first request of a url will be added.
  */
-export function loadExternalScript(url, moduleCode) {
-  if (!moduleCode || !url) {
-    utils.logError('cannot load external script without url and moduleCode');
-    return;
-  }
-  if (!includes(_vendorWhitelist, moduleCode)) {
-    utils.logError(`${moduleCode} not whitelisted for loading external JavaScript`);
-    return;
-  }
-  // only load each asset once
-  if (_requestCache[url]) {
-    return;
-  }
+export function loadExternalScript(url, moduleType, moduleCode, callback, doc, attributes) {
+  if (!isAllowed(url, moduleType, moduleCode)) return;
 
-  utils.logWarn(`module ${moduleCode} is loading external JavaScript`);
-  const script = document.createElement('script');
-  script.type = 'text/javascript';
-  script.async = true;
-  script.src = url;
+  const hasCallback = typeof callback === 'function' || typeof callback?.success === 'function' || typeof callback?.error === 'function';
 
-  utils.insertElement(script);
-  _requestCache[url] = true;
-};
-
-/**
- *
- * @deprecated
- * Do not use this function. Will be removed in the next release. If external resources are required, use #loadExternalScript instead.
- */
-export function loadScript(tagSrc, callback, cacheRequest) {
-  // var noop = () => {};
-  //
-  // callback = callback || noop;
-  if (!tagSrc) {
-    utils.logError('Error attempting to request empty URL', 'adloader.js:loadScript');
-    return;
-  }
-
-  if (cacheRequest) {
-    if (_requestCache[tagSrc]) {
-      if (callback && typeof callback === 'function') {
-        if (_requestCache[tagSrc].loaded) {
-          // invokeCallbacks immediately
-          callback();
-        } else {
-          // queue the callback
-          _requestCache[tagSrc].callbacks.push(callback);
-        }
+  function runCallback(cb, err) {
+    if (err == null) {
+      if (typeof cb === 'function') {
+        cb();
+      } else {
+        cb.success?.();
       }
     } else {
-      _requestCache[tagSrc] = {
-        loaded: false,
-        callbacks: []
-      };
-      if (callback && typeof callback === 'function') {
-        _requestCache[tagSrc].callbacks.push(callback);
-      }
-
-      requestResource(tagSrc, function () {
-        _requestCache[tagSrc].loaded = true;
-        try {
-          for (let i = 0; i < _requestCache[tagSrc].callbacks.length; i++) {
-            _requestCache[tagSrc].callbacks[i]();
-          }
-        } catch (e) {
-          utils.logError('Error executing callback', 'adloader.js:loadScript', e);
-        }
-      });
+      cb.error?.(err);
     }
-  } else {
-    // trigger one time request
-    requestResource(tagSrc, callback);
   }
-};
 
-function requestResource(tagSrc, callback) {
-  var jptScript = document.createElement('script');
-  jptScript.type = 'text/javascript';
-  jptScript.async = true;
+  if (!doc) {
+    doc = document; // provide a "valid" key for the WeakMap
+  }
+  // only load each asset once
+  const storedCachedObject = getCacheObject(doc, url);
+  if (storedCachedObject) {
+    if (hasCallback) {
+      if (storedCachedObject.loaded) {
+        // invokeCallbacks immediately
+        runCallback(callback, storedCachedObject.error);
+      } else {
+        // queue the callback
+        storedCachedObject.callbacks.push(callback);
+      }
+    }
+    return storedCachedObject.tag;
+  }
+  const cachedDocObj = _requestCache.get(doc) || {};
+  const cacheObject = {
+    error: null,
+    loaded: false,
+    tag: null,
+    callbacks: []
+  };
+  cachedDocObj[url] = cacheObject;
+  _requestCache.set(doc, cachedDocObj);
 
-  // Execute a callback if necessary
-  if (callback && typeof callback === 'function') {
+  if (hasCallback) {
+    cacheObject.callbacks.push(callback);
+  }
+
+  logWarn(`module ${moduleCode} is loading external JavaScript`);
+  return requestResource(url, function () {
+    cacheObject.loaded = true;
+    try {
+      for (let i = 0; i < cacheObject.callbacks.length; i++) {
+        runCallback(cacheObject.callbacks[i], cacheObject.error);
+      }
+      cacheObject.callbacks.length = 0;
+    } catch (e) {
+      logError('Error executing callback', 'adloader.js:loadExternalScript', e);
+    }
+  }, doc, attributes);
+
+  function requestResource(tagSrc, callback, doc, attributes) {
+    if (!doc) {
+      doc = document;
+    }
+    var jptScript = doc.createElement('script');
+    jptScript.type = 'text/javascript';
+    jptScript.async = true;
+
+    const cacheObject = getCacheObject(doc, url);
+    if (cacheObject) {
+      cacheObject.tag = jptScript;
+    }
+
+    function errorListener(e) {
+      cacheObject.error = e;
+      exit();
+    }
+    jptScript.addEventListener('error', errorListener);
+
+    function exit() {
+      jptScript.removeEventListener('error', errorListener);
+      jptScript.onload = null;
+      jptScript.onreadystatechange = null;
+      callback();
+    }
+
     if (jptScript.readyState) {
       jptScript.onreadystatechange = function () {
         if (jptScript.readyState === 'loaded' || jptScript.readyState === 'complete') {
           jptScript.onreadystatechange = null;
-          callback();
+          exit();
         }
       };
     } else {
       jptScript.onload = function () {
-        callback();
+        exit();
       };
     }
-  }
 
-  jptScript.src = tagSrc;
+    jptScript.src = tagSrc;
 
-  // add the new script tag to the page
-  var elToAppend = document.getElementsByTagName('head');
-  elToAppend = elToAppend.length ? elToAppend : document.getElementsByTagName('body');
-  if (elToAppend.length) {
-    elToAppend = elToAppend[0];
-    elToAppend.insertBefore(jptScript, elToAppend.firstChild);
+    if (attributes) {
+      setScriptAttributes(jptScript, attributes);
+    }
+
+    // add the new script tag to the page
+    insertElement(jptScript, doc);
+
+    return jptScript;
   }
+  function getCacheObject(doc, url) {
+    const cachedDocObj = _requestCache.get(doc);
+    if (cachedDocObj && cachedDocObj[url]) {
+      return cachedDocObj[url];
+    }
+    return null; // return new cache object?
+  }
+};
+
+const doPreload = memoize(function (url) {
+  return new Promise((resolve, reject) => {
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'script';
+    link.href = url;
+    link.onload = () => resolve();
+    link.onerror = reject;
+    insertElement(link);
+  });
+});
+
+export async function preloadExternalScript(url, moduleType, moduleCode) {
+  if (!isAllowed(url, moduleType, moduleCode)) {
+    throw new Error('Denied');
+  }
+  return doPreload(url);
 }
+preloadExternalScript.clear = doPreload.clear;
