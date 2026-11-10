@@ -18,7 +18,7 @@ Module that connects to xe.works demand sources
 | `env` | required | Environment name            | `string` |
 | `ext` | optional | Specific integration config | `object` |
 
-The adapter also answers to the bidder codes `xeworks` and `lunamediax`.
+The adapter also answers to the bidder code `xeworks`.
 
 # Test Parameters
 ```
