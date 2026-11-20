@@ -45,6 +45,25 @@ describe('Generic analytics', () => {
         expect(adapter.enabled).to.be.true;
       });
 
+      it('should not depend on options.hasOwnProperty', () => {
+        const nullPrototypeOptions = Object.assign(Object.create(null), {
+          url: 'mock',
+          method: 'GET'
+        });
+        adapter.enableAnalytics({ options: nullPrototypeOptions });
+        expect(adapter.enabled).to.be.true;
+
+        adapter.disableAnalytics();
+        adapter.enableAnalytics({
+          options: {
+            url: 'mock',
+            method: 'GET',
+            hasOwnProperty: null
+          }
+        });
+        expect(adapter.enabled).to.be.true;
+      });
+
       it('should still validate options after being disabled', () => {
         adapter.enableAnalytics({ options: {} });
         expect(adapter.enabled).to.be.false;
@@ -322,6 +341,42 @@ describe('Generic analytics', () => {
           clock.tick(500);
           sinon.assert.notCalled(handler);
         });
+      });
+
+      it('sends an incomplete batch when the page is hidden', () => {
+        adapter.enableAnalytics({
+          options: {
+            batchDelay: 1000,
+            batchSize: 10,
+            handler
+          }
+        });
+        events.emit(BID_RESPONSE, { i: 0 });
+        clock.tick(100); // let the analytics queue pass the event to the adapter
+        sinon.assert.notCalled(handler);
+        events.emit(BID_RESPONSE, { i: 1 });
+        window.dispatchEvent(new Event('pagehide'));
+        sinon.assert.calledOnce(handler);
+        sinon.assert.calledWith(handler, [
+          sinon.match({ eventType: BID_RESPONSE, args: { i: 0 } }),
+          sinon.match({ eventType: BID_RESPONSE, args: { i: 1 } })
+        ]);
+        clock.tick(1000);
+        sinon.assert.calledOnce(handler);
+      });
+
+      it('does not send an empty batch when the page is hidden', () => {
+        adapter.enableAnalytics({
+          options: {
+            batchSize: 1,
+            handler
+          }
+        });
+        events.emit(BID_RESPONSE, { i: 0 });
+        clock.tick(100);
+        sinon.assert.calledOnce(handler);
+        window.dispatchEvent(new Event('pagehide'));
+        sinon.assert.calledOnce(handler);
       });
 
       describe('and options.events is specified', () => {

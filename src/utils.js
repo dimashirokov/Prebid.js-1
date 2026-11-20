@@ -69,6 +69,9 @@ export function getUniqueIdentifierStr() {
  * https://gist.github.com/jed/982883 via node-uuid
  */
 export function generateUUID(placeholder) {
+  if (!placeholder && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
   return placeholder
     ? (placeholder ^ _getRandomData() >> placeholder / 4).toString(16)
     : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, generateUUID);
@@ -364,7 +367,7 @@ export function waitForElementToLoad(element, timeout) {
  *   `'omit'` for a cookieless request — the image fallback (which cannot omit cookies) is then skipped.
  */
 
-export function politeTriggerPixel(url, credentials = 'include') {
+export function politeTriggerPixel(url, credentials = 'include', immediate = false) {
   const triggerSync = () => {
     if (window.fetch && window.Request) {
       try {
@@ -381,7 +384,11 @@ export function politeTriggerPixel(url, credentials = 'include') {
     if (credentials !== 'omit') triggerPixel(url);
   };
 
-  runBackgroundTask(triggerSync);
+  if (immediate) {
+    triggerSync();
+  } else {
+    runBackgroundTask(triggerSync);
+  }
 }
 
 export function triggerPixel(url, done, timeout) {
